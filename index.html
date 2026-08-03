@@ -84,10 +84,21 @@
     display: flex;
     gap: 20px;
     flex-wrap: wrap;
+    align-items: flex-start;
   }
-  .row > .card {
+  .row > #today-card {
+    flex: 1.6;
+    min-width: 240px;
+  }
+  .side-column {
     flex: 1;
     min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .side-column .card {
+    margin-bottom: 0;
   }
   .card {
     background: var(--card);
@@ -96,11 +107,17 @@
     padding: 20px;
     margin-bottom: 20px;
   }
+  .card-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
   .streak-card {
     display: flex;
     flex-direction: column;
     gap: 14px;
-    justify-content: center;
   }
   .streak-item .streak-label {
     color: var(--text-dim);
@@ -117,6 +134,64 @@
   }
   .streak-item .streak-value.zero {
     color: var(--text-dim);
+  }
+  .leaderboard-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .leaderboard-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+  }
+  .leaderboard-list .rank {
+    color: var(--text-dim);
+    width: 16px;
+    font-weight: 600;
+  }
+  .leaderboard-list .lb-date {
+    flex: 1;
+    color: var(--text-dim);
+  }
+  .leaderboard-list .lb-time {
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .leaderboard-list .empty {
+    color: var(--text-dim);
+  }
+  .attempts-list {
+    list-style: none;
+    margin: 10px 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .attempts-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+  }
+  .attempts-list .remove-attempt {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 1rem;
+    padding: 0 4px;
+    cursor: pointer;
+  }
+  .attempts-list .remove-attempt:hover {
+    color: var(--danger);
   }
   .today-date {
     color: var(--text-dim);
@@ -288,19 +363,25 @@
       <section class="card" id="today-card">
         <div class="today-date" id="today-date-label">Loading...</div>
         <div id="today-content">Connecting...</div>
-        <div class="status" id="today-status"></div>
       </section>
 
-      <section class="card streak-card">
-        <div class="streak-item">
-          <div class="streak-label">Current streak</div>
-          <div class="streak-value" id="current-streak">-</div>
-        </div>
-        <div class="streak-item">
-          <div class="streak-label">Best streak</div>
-          <div class="streak-value" id="best-streak">-</div>
-        </div>
-      </section>
+      <div class="side-column">
+        <section class="card streak-card">
+          <div class="streak-item">
+            <div class="streak-label">Current streak</div>
+            <div class="streak-value" id="current-streak">-</div>
+          </div>
+          <div class="streak-item">
+            <div class="streak-label">Best streak</div>
+            <div class="streak-value" id="best-streak">-</div>
+          </div>
+        </section>
+
+        <section class="card leaderboard-card">
+          <div class="card-title">Leaderboard</div>
+          <ol class="leaderboard-list" id="leaderboard-list"></ol>
+        </section>
+      </div>
     </div>
 
     <section class="card">
@@ -318,7 +399,6 @@
   <div class="modal">
     <div class="date" id="modal-date"></div>
     <div id="modal-body"></div>
-    <div class="status" id="modal-status"></div>
     <div class="modal-actions">
       <button class="secondary" id="modal-close">Close</button>
     </div>
@@ -367,30 +447,50 @@ function formatLongDate(date) {
 
 const todayDateLabel = document.getElementById("today-date-label");
 const todayContent = document.getElementById("today-content");
-const todayStatus = document.getElementById("today-status");
 
 const today = new Date();
 const todayId = dateId(today);
 todayDateLabel.textContent = formatLongDate(today);
 
-let entriesCache = {}; // dateId -> { seconds, skipped }
+let entriesCache = {}; // dateId -> { seconds: bestAttemptSeconds, skipped, attempts: [{seconds, loggedAt}] }
 
 async function fetchAllEntries() {
   const snap = await getDocs(collection(db, ENTRIES_COLLECTION));
   snap.forEach((d) => {
     const data = d.data();
-    entriesCache[d.id] = { seconds: data.seconds || 0, skipped: !!data.skipped };
+    // Back-compat: older docs stored a single top-level `seconds` field instead of `attempts`.
+    const attempts = Array.isArray(data.attempts)
+      ? data.attempts
+      : data.seconds ? [{ seconds: data.seconds, loggedAt: data.updatedAt || null }] : [];
+    const seconds = attempts.length ? Math.max(...attempts.map((a) => a.seconds)) : 0;
+    entriesCache[d.id] = { seconds, skipped: !!data.skipped, attempts };
   });
 }
 
-async function saveEntry(id, { seconds, skipped }) {
+async function saveDay(id, { attempts, skipped }) {
+  const seconds = attempts.length ? Math.max(...attempts.map((a) => a.seconds)) : 0;
   await setDoc(doc(db, ENTRIES_COLLECTION, id), {
     date: id,
-    seconds,
+    attempts,
     skipped: !!skipped,
     updatedAt: new Date().toISOString()
   });
-  entriesCache[id] = { seconds, skipped: !!skipped };
+  entriesCache[id] = { seconds, skipped: !!skipped, attempts };
+}
+
+function addAttempt(id, seconds) {
+  const existing = entriesCache[id];
+  const attempts = [...(existing?.attempts || []), { seconds, loggedAt: new Date().toISOString() }];
+  return saveDay(id, { attempts, skipped: false });
+}
+
+function removeAttempt(id, index) {
+  const attempts = (entriesCache[id]?.attempts || []).filter((_, i) => i !== index);
+  return saveDay(id, { attempts, skipped: false });
+}
+
+function markSkipped(id) {
+  return saveDay(id, { attempts: [], skipped: true });
 }
 
 function isHit(entry) {
@@ -446,104 +546,142 @@ function renderStreaks() {
   bestStreakEl.classList.toggle("zero", best === 0);
 }
 
-function entryFormHtml({ idPrefix, existingSeconds, submitLabel }) {
-  const mins = existingSeconds !== undefined ? Math.floor(existingSeconds / 60) : 0;
-  const secs = existingSeconds !== undefined ? existingSeconds % 60 : 0;
-  return `
-    <form class="entry-form" id="${idPrefix}-form">
-      <div class="field">
-        <label for="${idPrefix}-mins">Minutes</label>
-        <input type="number" id="${idPrefix}-mins" min="0" value="${mins}" inputmode="numeric">
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-secs">Seconds</label>
-        <input type="number" id="${idPrefix}-secs" min="0" max="59" value="${secs}" inputmode="numeric">
-      </div>
-      <button type="submit">${submitLabel}</button>
-    </form>
-  `;
+function formatShortDate(id) {
+  return new Date(id + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function renderTodayForm(existingSeconds) {
-  const label = existingSeconds !== undefined ? "Update today's plank" : "Save today's plank";
-  todayContent.innerHTML = entryFormHtml({ idPrefix: "today", existingSeconds, submitLabel: label }) +
-    `<button type="button" class="secondary" id="skip-today-btn" style="margin-top:10px;">Didn't do a plank today</button>`;
-  document.getElementById("today-form").addEventListener("submit", (e) => onSubmitEntry(e, existingSeconds !== undefined));
-  document.getElementById("skip-today-btn").addEventListener("click", onSkipToday);
-}
+const leaderboardListEl = document.getElementById("leaderboard-list");
 
-function renderTodayResult(seconds) {
-  todayContent.innerHTML = `
-    <div class="today-result">
-      <div class="time">${formatSeconds(seconds)}</div>
-      <div class="label">logged for today</div>
-    </div>
-    <button class="secondary" id="edit-today-btn">Edit</button>
-  `;
-  document.getElementById("edit-today-btn").addEventListener("click", () => renderTodayForm(seconds));
-}
+function renderLeaderboard() {
+  const top = Object.entries(entriesCache)
+    .filter(([, entry]) => isHit(entry))
+    .map(([id, entry]) => ({ id, seconds: entry.seconds }))
+    .sort((a, b) => b.seconds - a.seconds)
+    .slice(0, 5);
 
-function renderTodaySkipped() {
-  todayContent.innerHTML = `
-    <div class="today-result">
-      <div class="time skip">No plank today</div>
-    </div>
-    <button class="secondary" id="edit-today-btn">Log a time instead</button>
-  `;
-  document.getElementById("edit-today-btn").addEventListener("click", () => renderTodayForm());
-}
-
-async function onSubmitEntry(e, isUpdate) {
-  e.preventDefault();
-  const mins = parseInt(document.getElementById("today-mins").value, 10) || 0;
-  const secs = parseInt(document.getElementById("today-secs").value, 10) || 0;
-  const totalSeconds = mins * 60 + secs;
-
-  if (totalSeconds <= 0) {
-    todayStatus.textContent = "Enter a time greater than 0.";
-    todayStatus.classList.add("error");
+  if (top.length === 0) {
+    leaderboardListEl.innerHTML = `<li class="empty">No entries yet</li>`;
     return;
   }
 
-  todayStatus.textContent = "Saving...";
-  todayStatus.classList.remove("error");
+  leaderboardListEl.innerHTML = top.map((entry, i) => `
+    <li>
+      <span class="rank">${i + 1}</span>
+      <span class="lb-date">${formatShortDate(entry.id)}</span>
+      <span class="lb-time">${formatSeconds(entry.seconds)}</span>
+    </li>
+  `).join("");
+}
 
-  try {
-    await saveEntry(todayId, { seconds: totalSeconds, skipped: false });
-    renderTodayResult(totalSeconds);
-    todayStatus.textContent = isUpdate ? "Updated!" : "Saved!";
-    renderCalendar();
-    renderStreaks();
-  } catch (err) {
-    todayStatus.textContent = "Failed to save: " + err.message;
-    todayStatus.classList.add("error");
+function attemptsListHtml(attempts) {
+  if (!attempts.length) return "";
+  return `
+    <ul class="attempts-list">
+      ${attempts.map((a, i) => `
+        <li>
+          <span>${formatSeconds(a.seconds)}</span>
+          <button type="button" class="remove-attempt" data-index="${i}" aria-label="Remove attempt">&times;</button>
+        </li>
+      `).join("")}
+    </ul>
+  `;
+}
+
+function dayEditorHtml(entry, { skipLabel }) {
+  const hasAttempts = entry.attempts.length > 0;
+  return `
+    ${hasAttempts ? `
+      <div class="today-result">
+        <div class="time">${formatSeconds(entry.seconds)}</div>
+        <div class="label">best today</div>
+      </div>
+    ` : ""}
+    ${entry.skipped ? `<div class="time skip">No plank logged</div>` : ""}
+    ${attemptsListHtml(entry.attempts)}
+    <form class="entry-form day-form">
+      <div class="field">
+        <label>Minutes</label>
+        <input type="number" class="mins-input" min="0" value="0" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label>Seconds</label>
+        <input type="number" class="secs-input" min="0" max="59" value="0" inputmode="numeric">
+      </div>
+      <button type="submit">${hasAttempts ? "Add another" : "Save"}</button>
+    </form>
+    <div class="status" data-role="form-status"></div>
+    ${!hasAttempts ? `<button type="button" class="secondary skip-btn" style="margin-top:10px;">${skipLabel}</button>` : ""}
+  `;
+}
+
+function wireDayEditor(container, id, onChange) {
+  const statusEl = container.querySelector('[data-role="form-status"]');
+
+  const form = container.querySelector(".day-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const mins = parseInt(container.querySelector(".mins-input").value, 10) || 0;
+      const secs = parseInt(container.querySelector(".secs-input").value, 10) || 0;
+      const totalSeconds = mins * 60 + secs;
+
+      if (totalSeconds <= 0) {
+        statusEl.textContent = "Enter a time greater than 0.";
+        statusEl.classList.add("error");
+        return;
+      }
+
+      statusEl.textContent = "Saving...";
+      statusEl.classList.remove("error");
+      try {
+        await addAttempt(id, totalSeconds);
+        onChange();
+      } catch (err) {
+        statusEl.textContent = "Failed to save: " + err.message;
+        statusEl.classList.add("error");
+      }
+    });
+  }
+
+  container.querySelectorAll(".remove-attempt").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await removeAttempt(id, parseInt(btn.dataset.index, 10));
+        onChange();
+      } catch (err) {
+        statusEl.textContent = "Failed to remove: " + err.message;
+        statusEl.classList.add("error");
+      }
+    });
+  });
+
+  const skipBtn = container.querySelector(".skip-btn");
+  if (skipBtn) {
+    skipBtn.addEventListener("click", async () => {
+      statusEl.textContent = "Saving...";
+      statusEl.classList.remove("error");
+      try {
+        await markSkipped(id);
+        onChange();
+      } catch (err) {
+        statusEl.textContent = "Failed to save: " + err.message;
+        statusEl.classList.add("error");
+      }
+    });
   }
 }
 
-async function onSkipToday() {
-  todayStatus.textContent = "Saving...";
-  todayStatus.classList.remove("error");
-  try {
-    await saveEntry(todayId, { seconds: 0, skipped: true });
-    renderTodaySkipped();
-    todayStatus.textContent = "Saved!";
-    renderCalendar();
-    renderStreaks();
-  } catch (err) {
-    todayStatus.textContent = "Failed to save: " + err.message;
-    todayStatus.classList.add("error");
-  }
+function refreshAll() {
+  renderTodayCard();
+  renderCalendar();
+  renderStreaks();
+  renderLeaderboard();
 }
 
-function loadToday() {
-  const entry = entriesCache[todayId];
-  if (!entry) {
-    renderTodayForm();
-  } else if (entry.skipped) {
-    renderTodaySkipped();
-  } else {
-    renderTodayResult(entry.seconds);
-  }
+function renderTodayCard() {
+  const entry = entriesCache[todayId] || { seconds: 0, skipped: false, attempts: [] };
+  todayContent.innerHTML = dayEditorHtml(entry, { skipLabel: "Didn't do a plank today" });
+  wireDayEditor(todayContent, todayId, refreshAll);
 }
 
 // --- Calendar ---
@@ -554,7 +692,6 @@ const nextMonthBtn = document.getElementById("next-month");
 const modalBackdrop = document.getElementById("modal-backdrop");
 const modalDate = document.getElementById("modal-date");
 const modalBody = document.getElementById("modal-body");
-const modalStatus = document.getElementById("modal-status");
 document.getElementById("modal-close").addEventListener("click", () => modalBackdrop.classList.add("hidden"));
 modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) modalBackdrop.classList.add("hidden"); });
 
@@ -599,8 +736,6 @@ function renderCalendar() {
 
 function openDayModal(date, id) {
   modalDate.textContent = formatLongDate(date);
-  modalStatus.textContent = "";
-  modalStatus.classList.remove("error");
 
   if (id > todayId) {
     modalBody.innerHTML = `<div class="status">Can't log a plank for a future date.</div>`;
@@ -608,62 +743,11 @@ function openDayModal(date, id) {
     return;
   }
 
-  const entry = entriesCache[id];
-  const label = entry ? "Update" : "Save";
-  const statusLabel = !entry
-    ? "No entry yet"
-    : entry.skipped
-      ? "Marked as no plank this day"
-      : `Logged: ${formatSeconds(entry.seconds)}`;
-
-  modalBody.innerHTML = `
-    <div class="status" style="margin-top:0;">${statusLabel}</div>
-    ${entryFormHtml({ idPrefix: "modal", existingSeconds: entry && !entry.skipped ? entry.seconds : undefined, submitLabel: label })}
-    <button type="button" class="secondary" id="modal-skip-btn">No plank this day</button>
-  `;
-
-  document.getElementById("modal-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const mins = parseInt(document.getElementById("modal-mins").value, 10) || 0;
-    const secs = parseInt(document.getElementById("modal-secs").value, 10) || 0;
-    const totalSeconds = mins * 60 + secs;
-
-    if (totalSeconds <= 0) {
-      modalStatus.textContent = "Enter a time greater than 0.";
-      modalStatus.classList.add("error");
-      return;
-    }
-
-    modalStatus.textContent = "Saving...";
-    modalStatus.classList.remove("error");
-
-    try {
-      await saveEntry(id, { seconds: totalSeconds, skipped: false });
-      if (id === todayId) renderTodayResult(totalSeconds);
-      renderCalendar();
-      renderStreaks();
-      openDayModal(date, id);
-      modalStatus.textContent = "Saved!";
-    } catch (err) {
-      modalStatus.textContent = "Failed to save: " + err.message;
-      modalStatus.classList.add("error");
-    }
-  });
-
-  document.getElementById("modal-skip-btn").addEventListener("click", async () => {
-    modalStatus.textContent = "Saving...";
-    modalStatus.classList.remove("error");
-    try {
-      await saveEntry(id, { seconds: 0, skipped: true });
-      if (id === todayId) renderTodaySkipped();
-      renderCalendar();
-      renderStreaks();
-      openDayModal(date, id);
-      modalStatus.textContent = "Saved!";
-    } catch (err) {
-      modalStatus.textContent = "Failed to save: " + err.message;
-      modalStatus.classList.add("error");
-    }
+  const entry = entriesCache[id] || { seconds: 0, skipped: false, attempts: [] };
+  modalBody.innerHTML = dayEditorHtml(entry, { skipLabel: "No plank this day" });
+  wireDayEditor(modalBody, id, () => {
+    refreshAll();
+    openDayModal(date, id);
   });
 
   modalBackdrop.classList.remove("hidden");
@@ -696,20 +780,14 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) return;
   try {
     await fetchAllEntries();
-    loadToday();
-    renderCalendar();
-    renderStreaks();
+    refreshAll();
   } catch (err) {
-    todayContent.textContent = "Could not load entries.";
-    todayStatus.textContent = err.message;
-    todayStatus.classList.add("error");
+    todayContent.innerHTML = `<div class="status error">Could not load entries: ${err.message}</div>`;
   }
 });
 
 signInAnonymously(auth).catch((err) => {
-  todayContent.textContent = "Sign-in failed.";
-  todayStatus.textContent = err.message;
-  todayStatus.classList.add("error");
+  todayContent.innerHTML = `<div class="status error">Sign-in failed: ${err.message}</div>`;
 });
 </script>
 </body>
