@@ -41,7 +41,7 @@
   }
   main {
     width: 100%;
-    max-width: 480px;
+    max-width: 560px;
   }
   header {
     text-align: center;
@@ -80,12 +80,43 @@
     border-bottom-color: var(--accent);
   }
   .section-panel.hidden { display: none; }
+  .row {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .row > .card {
+    flex: 1;
+    min-width: 180px;
+  }
   .card {
     background: var(--card);
     border: 1px solid var(--card-border);
     border-radius: var(--radius);
     padding: 20px;
     margin-bottom: 20px;
+  }
+  .streak-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    justify-content: center;
+  }
+  .streak-item .streak-label {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 2px;
+  }
+  .streak-item .streak-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+  .streak-item .streak-value.zero {
+    color: var(--text-dim);
   }
   .today-date {
     color: var(--text-dim);
@@ -108,6 +139,10 @@
   .today-result .label {
     color: var(--text-dim);
     font-size: 0.9rem;
+  }
+  .today-result .time.skip {
+    font-size: 1.5rem;
+    color: var(--text-dim);
   }
   .entry-form {
     display: flex;
@@ -199,6 +234,11 @@
     color: var(--accent);
     font-weight: 600;
   }
+  .day.skipped {
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    color: var(--text-dim);
+    text-decoration: line-through;
+  }
   .day.is-today {
     border-color: var(--accent);
   }
@@ -244,11 +284,24 @@
   </nav>
 
   <div class="section-panel" data-section-panel="plank">
-    <section class="card" id="today-card">
-      <div class="today-date" id="today-date-label">Loading...</div>
-      <div id="today-content">Connecting...</div>
-      <div class="status" id="today-status"></div>
-    </section>
+    <div class="row">
+      <section class="card" id="today-card">
+        <div class="today-date" id="today-date-label">Loading...</div>
+        <div id="today-content">Connecting...</div>
+        <div class="status" id="today-status"></div>
+      </section>
+
+      <section class="card streak-card">
+        <div class="streak-item">
+          <div class="streak-label">Current streak</div>
+          <div class="streak-value" id="current-streak">-</div>
+        </div>
+        <div class="streak-item">
+          <div class="streak-label">Best streak</div>
+          <div class="streak-value" id="best-streak">-</div>
+        </div>
+      </section>
+    </div>
 
     <section class="card">
       <div class="calendar-header">
@@ -276,7 +329,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, collection, getDocs
+  getFirestore, doc, setDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -320,15 +373,77 @@ const today = new Date();
 const todayId = dateId(today);
 todayDateLabel.textContent = formatLongDate(today);
 
-let entriesCache = {}; // dateId -> seconds, populated per visible month
+let entriesCache = {}; // dateId -> { seconds, skipped }
 
-async function saveEntry(id, seconds) {
+async function fetchAllEntries() {
+  const snap = await getDocs(collection(db, ENTRIES_COLLECTION));
+  snap.forEach((d) => {
+    const data = d.data();
+    entriesCache[d.id] = { seconds: data.seconds || 0, skipped: !!data.skipped };
+  });
+}
+
+async function saveEntry(id, { seconds, skipped }) {
   await setDoc(doc(db, ENTRIES_COLLECTION, id), {
     date: id,
     seconds,
+    skipped: !!skipped,
     updatedAt: new Date().toISOString()
   });
-  entriesCache[id] = seconds;
+  entriesCache[id] = { seconds, skipped: !!skipped };
+}
+
+function isHit(entry) {
+  return !!entry && !entry.skipped && entry.seconds > 0;
+}
+
+function formatDays(n) {
+  return `${n} day${n === 1 ? "" : "s"}`;
+}
+
+function computeCurrentStreak() {
+  const cursor = new Date(today);
+  if (!entriesCache[todayId]) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  let streak = 0;
+  while (isHit(entriesCache[dateId(cursor)])) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function computeBestStreak() {
+  const hitDates = Object.keys(entriesCache).filter((id) => isHit(entriesCache[id])).sort();
+  let best = 0;
+  let run = 0;
+  let prevId = null;
+  for (const id of hitDates) {
+    if (prevId) {
+      const prev = new Date(prevId + "T00:00:00");
+      const cur = new Date(id + "T00:00:00");
+      const diffDays = Math.round((cur - prev) / 86400000);
+      run = diffDays === 1 ? run + 1 : 1;
+    } else {
+      run = 1;
+    }
+    prevId = id;
+    if (run > best) best = run;
+  }
+  return best;
+}
+
+const currentStreakEl = document.getElementById("current-streak");
+const bestStreakEl = document.getElementById("best-streak");
+
+function renderStreaks() {
+  const current = computeCurrentStreak();
+  const best = Math.max(computeBestStreak(), current);
+  currentStreakEl.textContent = formatDays(current);
+  currentStreakEl.classList.toggle("zero", current === 0);
+  bestStreakEl.textContent = formatDays(best);
+  bestStreakEl.classList.toggle("zero", best === 0);
 }
 
 function entryFormHtml({ idPrefix, existingSeconds, submitLabel }) {
@@ -351,8 +466,10 @@ function entryFormHtml({ idPrefix, existingSeconds, submitLabel }) {
 
 function renderTodayForm(existingSeconds) {
   const label = existingSeconds !== undefined ? "Update today's plank" : "Save today's plank";
-  todayContent.innerHTML = entryFormHtml({ idPrefix: "today", existingSeconds, submitLabel: label });
+  todayContent.innerHTML = entryFormHtml({ idPrefix: "today", existingSeconds, submitLabel: label }) +
+    `<button type="button" class="secondary" id="skip-today-btn" style="margin-top:10px;">Didn't do a plank today</button>`;
   document.getElementById("today-form").addEventListener("submit", (e) => onSubmitEntry(e, existingSeconds !== undefined));
+  document.getElementById("skip-today-btn").addEventListener("click", onSkipToday);
 }
 
 function renderTodayResult(seconds) {
@@ -364,6 +481,16 @@ function renderTodayResult(seconds) {
     <button class="secondary" id="edit-today-btn">Edit</button>
   `;
   document.getElementById("edit-today-btn").addEventListener("click", () => renderTodayForm(seconds));
+}
+
+function renderTodaySkipped() {
+  todayContent.innerHTML = `
+    <div class="today-result">
+      <div class="time skip">No plank today</div>
+    </div>
+    <button class="secondary" id="edit-today-btn">Log a time instead</button>
+  `;
+  document.getElementById("edit-today-btn").addEventListener("click", () => renderTodayForm());
 }
 
 async function onSubmitEntry(e, isUpdate) {
@@ -382,29 +509,40 @@ async function onSubmitEntry(e, isUpdate) {
   todayStatus.classList.remove("error");
 
   try {
-    await saveEntry(todayId, totalSeconds);
+    await saveEntry(todayId, { seconds: totalSeconds, skipped: false });
     renderTodayResult(totalSeconds);
     todayStatus.textContent = isUpdate ? "Updated!" : "Saved!";
     renderCalendar();
+    renderStreaks();
   } catch (err) {
     todayStatus.textContent = "Failed to save: " + err.message;
     todayStatus.classList.add("error");
   }
 }
 
-async function loadToday() {
+async function onSkipToday() {
+  todayStatus.textContent = "Saving...";
+  todayStatus.classList.remove("error");
   try {
-    const snap = await getDoc(doc(db, ENTRIES_COLLECTION, todayId));
-    if (snap.exists()) {
-      entriesCache[todayId] = snap.data().seconds;
-      renderTodayResult(snap.data().seconds);
-    } else {
-      renderTodayForm();
-    }
+    await saveEntry(todayId, { seconds: 0, skipped: true });
+    renderTodaySkipped();
+    todayStatus.textContent = "Saved!";
+    renderCalendar();
+    renderStreaks();
   } catch (err) {
-    todayContent.textContent = "Could not load today's entry.";
-    todayStatus.textContent = err.message;
+    todayStatus.textContent = "Failed to save: " + err.message;
     todayStatus.classList.add("error");
+  }
+}
+
+function loadToday() {
+  const entry = entriesCache[todayId];
+  if (!entry) {
+    renderTodayForm();
+  } else if (entry.skipped) {
+    renderTodaySkipped();
+  } else {
+    renderTodayResult(entry.seconds);
   }
 }
 
@@ -425,21 +563,8 @@ let viewMonth = today.getMonth(); // 0-indexed
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
 
-async function fetchMonthEntries(year, month) {
-  // Firestore doc IDs are YYYY-MM-DD; fetch full collection and filter client-side
-  // (collection is small for a personal daily tracker).
-  const snap = await getDocs(collection(db, ENTRIES_COLLECTION));
-  const prefix = `${year}-${String(month + 1).padStart(2, "0")}`;
-  snap.forEach((d) => {
-    if (d.id.startsWith(prefix)) {
-      entriesCache[d.id] = d.data().seconds;
-    }
-  });
-}
-
-async function renderCalendar() {
+function renderCalendar() {
   monthLabel.textContent = new Date(viewYear, viewMonth, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  await fetchMonthEntries(viewYear, viewMonth);
 
   calendarGrid.innerHTML = "";
   DOW.forEach((d) => {
@@ -464,7 +589,8 @@ async function renderCalendar() {
     const el = document.createElement("div");
     el.className = "day";
     if (id === todayId) el.classList.add("is-today");
-    if (entriesCache[id] !== undefined) el.classList.add("has-entry");
+    const entry = entriesCache[id];
+    if (entry) el.classList.add(entry.skipped ? "skipped" : "has-entry");
     el.textContent = day;
     el.addEventListener("click", () => openDayModal(date, id));
     calendarGrid.appendChild(el);
@@ -482,9 +608,20 @@ function openDayModal(date, id) {
     return;
   }
 
-  const seconds = entriesCache[id];
-  const label = seconds !== undefined ? "Update" : "Save";
-  modalBody.innerHTML = entryFormHtml({ idPrefix: "modal", existingSeconds: seconds, submitLabel: label });
+  const entry = entriesCache[id];
+  const label = entry ? "Update" : "Save";
+  const statusLabel = !entry
+    ? "No entry yet"
+    : entry.skipped
+      ? "Marked as no plank this day"
+      : `Logged: ${formatSeconds(entry.seconds)}`;
+
+  modalBody.innerHTML = `
+    <div class="status" style="margin-top:0;">${statusLabel}</div>
+    ${entryFormHtml({ idPrefix: "modal", existingSeconds: entry && !entry.skipped ? entry.seconds : undefined, submitLabel: label })}
+    <button type="button" class="secondary" id="modal-skip-btn">No plank this day</button>
+  `;
+
   document.getElementById("modal-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const mins = parseInt(document.getElementById("modal-mins").value, 10) || 0;
@@ -501,15 +638,34 @@ function openDayModal(date, id) {
     modalStatus.classList.remove("error");
 
     try {
-      await saveEntry(id, totalSeconds);
-      modalStatus.textContent = "Saved!";
+      await saveEntry(id, { seconds: totalSeconds, skipped: false });
       if (id === todayId) renderTodayResult(totalSeconds);
       renderCalendar();
+      renderStreaks();
+      openDayModal(date, id);
+      modalStatus.textContent = "Saved!";
     } catch (err) {
       modalStatus.textContent = "Failed to save: " + err.message;
       modalStatus.classList.add("error");
     }
   });
+
+  document.getElementById("modal-skip-btn").addEventListener("click", async () => {
+    modalStatus.textContent = "Saving...";
+    modalStatus.classList.remove("error");
+    try {
+      await saveEntry(id, { seconds: 0, skipped: true });
+      if (id === todayId) renderTodaySkipped();
+      renderCalendar();
+      renderStreaks();
+      openDayModal(date, id);
+      modalStatus.textContent = "Saved!";
+    } catch (err) {
+      modalStatus.textContent = "Failed to save: " + err.message;
+      modalStatus.classList.add("error");
+    }
+  });
+
   modalBackdrop.classList.remove("hidden");
 }
 
@@ -536,10 +692,17 @@ document.getElementById("toolbar").addEventListener("click", (e) => {
 });
 
 // --- Boot ---
-onAuthStateChanged(auth, (user) => {
-  if (user) {
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return;
+  try {
+    await fetchAllEntries();
     loadToday();
     renderCalendar();
+    renderStreaks();
+  } catch (err) {
+    todayContent.textContent = "Could not load entries.";
+    todayStatus.textContent = err.message;
+    todayStatus.classList.add("error");
   }
 });
 
