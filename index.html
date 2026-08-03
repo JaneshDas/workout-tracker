@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workout Tracker</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0f1115;
+    --card: #171a21;
+    --card-border: #262b36;
+    --text: #eef1f6;
+    --text-dim: #9aa4b2;
+    --accent: #5eead4;
+    --accent-dim: #14b8a6;
+    --danger: #f87171;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f7fa;
+      --card: #ffffff;
+      --card-border: #e2e6ec;
+      --text: #171a21;
+      --text-dim: #5b6472;
+      --accent: #0d9488;
+      --accent-dim: #0f766e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px 64px;
+  }
+  main {
+    width: 100%;
+    max-width: 480px;
+  }
+  header {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+  header h1 {
+    font-size: 1.5rem;
+    margin: 0 0 4px;
+    letter-spacing: -0.02em;
+  }
+  header p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .today-date {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .today-result {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .today-result .time {
+    font-size: 2.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .today-result .label {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+  .entry-form {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .field label {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+  .field input {
+    width: 76px;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    background: transparent;
+    color: var(--text);
+    font-size: 1rem;
+  }
+  button {
+    padding: 11px 20px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: #04211d;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--card-border);
+    padding: 6px 10px;
+    font-weight: 500;
+  }
+  .status {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-top: 10px;
+  }
+  .status.error { color: var(--danger); }
+
+  .calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .calendar-header h2 {
+    font-size: 1rem;
+    margin: 0;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    text-align: center;
+  }
+  .grid .dow {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    padding-bottom: 4px;
+  }
+  .day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    position: relative;
+    border: 1px solid transparent;
+  }
+  .day.empty { cursor: default; }
+  .day.has-entry {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .day.is-today {
+    border-color: var(--accent);
+  }
+  .day:not(.empty):hover {
+    background: var(--card-border);
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 10;
+  }
+  .modal-backdrop.hidden { display: none; }
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    padding: 22px;
+    width: 100%;
+    max-width: 320px;
+    text-align: center;
+  }
+  .modal .date { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 8px; }
+  .modal .time { font-size: 2rem; font-weight: 700; color: var(--accent); margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Workout Tracker</h1>
+    <p>How long can you hold a plank today?</p>
+  </header>
+
+  <section class="card" id="today-card">
+    <div class="today-date" id="today-date-label">Loading...</div>
+    <div id="today-content">Connecting...</div>
+    <div class="status" id="today-status"></div>
+  </section>
+
+  <section class="card">
+    <div class="calendar-header">
+      <button class="secondary" id="prev-month">&larr;</button>
+      <h2 id="month-label"></h2>
+      <button class="secondary" id="next-month">&rarr;</button>
+    </div>
+    <div class="grid" id="calendar-grid"></div>
+  </section>
+</main>
+
+<div class="modal-backdrop hidden" id="modal-backdrop">
+  <div class="modal">
+    <div class="date" id="modal-date"></div>
+    <div class="time" id="modal-time"></div>
+    <button class="secondary" id="modal-close">Close</button>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  getFirestore, doc, getDoc, setDoc, collection, getDocs
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAbbZvg_Cp7o1fIE6rn1yU1VzzmuzD4rHw",
+  authDomain: "workout-tracker-janesh.firebaseapp.com",
+  projectId: "workout-tracker-janesh",
+  storageBucket: "workout-tracker-janesh.firebasestorage.app",
+  messagingSenderId: "1031985808077",
+  appId: "1:1031985808077:web:7df8e6273e63d42c5e9f84"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const ENTRIES_COLLECTION = "plankEntries";
+
+function dateId(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function formatSeconds(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${s}s`;
+}
+
+function formatLongDate(date) {
+  return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+}
+
+const todayDateLabel = document.getElementById("today-date-label");
+const todayContent = document.getElementById("today-content");
+const todayStatus = document.getElementById("today-status");
+
+const today = new Date();
+const todayId = dateId(today);
+todayDateLabel.textContent = formatLongDate(today);
+
+let entriesCache = {}; // dateId -> seconds, populated per visible month
+
+function renderTodayForm() {
+  todayContent.innerHTML = `
+    <form class="entry-form" id="entry-form">
+      <div class="field">
+        <label for="mins">Minutes</label>
+        <input type="number" id="mins" min="0" value="0" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="secs">Seconds</label>
+        <input type="number" id="secs" min="0" max="59" value="0" inputmode="numeric">
+      </div>
+      <button type="submit">Save today's plank</button>
+    </form>
+  `;
+  document.getElementById("entry-form").addEventListener("submit", onSubmitEntry);
+}
+
+function renderTodayResult(seconds) {
+  todayContent.innerHTML = `
+    <div class="today-result">
+      <div class="time">${formatSeconds(seconds)}</div>
+      <div class="label">logged for today</div>
+    </div>
+  `;
+}
+
+async function onSubmitEntry(e) {
+  e.preventDefault();
+  const mins = parseInt(document.getElementById("mins").value, 10) || 0;
+  const secs = parseInt(document.getElementById("secs").value, 10) || 0;
+  const totalSeconds = mins * 60 + secs;
+
+  if (totalSeconds <= 0) {
+    todayStatus.textContent = "Enter a time greater than 0.";
+    todayStatus.classList.add("error");
+    return;
+  }
+
+  todayStatus.textContent = "Saving...";
+  todayStatus.classList.remove("error");
+
+  try {
+    await setDoc(doc(db, ENTRIES_COLLECTION, todayId), {
+      date: todayId,
+      seconds: totalSeconds,
+      createdAt: new Date().toISOString()
+    });
+    entriesCache[todayId] = totalSeconds;
+    renderTodayResult(totalSeconds);
+    todayStatus.textContent = "Saved!";
+    renderCalendar();
+  } catch (err) {
+    todayStatus.textContent = "Failed to save: " + err.message;
+    todayStatus.classList.add("error");
+  }
+}
+
+async function loadToday() {
+  try {
+    const snap = await getDoc(doc(db, ENTRIES_COLLECTION, todayId));
+    if (snap.exists()) {
+      entriesCache[todayId] = snap.data().seconds;
+      renderTodayResult(snap.data().seconds);
+    } else {
+      renderTodayForm();
+    }
+  } catch (err) {
+    todayContent.textContent = "Could not load today's entry.";
+    todayStatus.textContent = err.message;
+    todayStatus.classList.add("error");
+  }
+}
+
+// --- Calendar ---
+const monthLabel = document.getElementById("month-label");
+const calendarGrid = document.getElementById("calendar-grid");
+const prevMonthBtn = document.getElementById("prev-month");
+const nextMonthBtn = document.getElementById("next-month");
+const modalBackdrop = document.getElementById("modal-backdrop");
+const modalDate = document.getElementById("modal-date");
+const modalTime = document.getElementById("modal-time");
+document.getElementById("modal-close").addEventListener("click", () => modalBackdrop.classList.add("hidden"));
+modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) modalBackdrop.classList.add("hidden"); });
+
+let viewYear = today.getFullYear();
+let viewMonth = today.getMonth(); // 0-indexed
+
+const DOW = ["S", "M", "T", "W", "T", "F", "S"];
+
+async function fetchMonthEntries(year, month) {
+  // Firestore doc IDs are YYYY-MM-DD; fetch full collection and filter client-side
+  // (collection is small for a personal daily tracker).
+  const snap = await getDocs(collection(db, ENTRIES_COLLECTION));
+  const prefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+  snap.forEach((d) => {
+    if (d.id.startsWith(prefix)) {
+      entriesCache[d.id] = d.data().seconds;
+    }
+  });
+}
+
+async function renderCalendar() {
+  monthLabel.textContent = new Date(viewYear, viewMonth, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  await fetchMonthEntries(viewYear, viewMonth);
+
+  calendarGrid.innerHTML = "";
+  DOW.forEach((d) => {
+    const el = document.createElement("div");
+    el.className = "dow";
+    el.textContent = d;
+    calendarGrid.appendChild(el);
+  });
+
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+  for (let i = 0; i < firstDay; i++) {
+    const el = document.createElement("div");
+    el.className = "day empty";
+    calendarGrid.appendChild(el);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(viewYear, viewMonth, day);
+    const id = dateId(date);
+    const el = document.createElement("div");
+    el.className = "day";
+    if (id === todayId) el.classList.add("is-today");
+    if (entriesCache[id] !== undefined) el.classList.add("has-entry");
+    el.textContent = day;
+    el.addEventListener("click", () => openDayModal(date, id));
+    calendarGrid.appendChild(el);
+  }
+}
+
+function openDayModal(date, id) {
+  modalDate.textContent = formatLongDate(date);
+  const seconds = entriesCache[id];
+  modalTime.textContent = seconds !== undefined ? formatSeconds(seconds) : "No entry";
+  modalBackdrop.classList.remove("hidden");
+}
+
+prevMonthBtn.addEventListener("click", () => {
+  viewMonth--;
+  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+  renderCalendar();
+});
+nextMonthBtn.addEventListener("click", () => {
+  viewMonth++;
+  if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+  renderCalendar();
+});
+
+// --- Boot ---
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    loadToday();
+    renderCalendar();
+  }
+});
+
+signInAnonymously(auth).catch((err) => {
+  todayContent.textContent = "Sign-in failed.";
+  todayStatus.textContent = err.message;
+  todayStatus.classList.add("error");
+});
+</script>
+</body>
+</html>
