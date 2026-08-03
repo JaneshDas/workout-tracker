@@ -57,6 +57,29 @@
     color: var(--text-dim);
     font-size: 0.9rem;
   }
+  nav.toolbar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  nav.toolbar button {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: var(--text-dim);
+    padding: 10px 6px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  nav.toolbar button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .section-panel.hidden { display: none; }
   .card {
     background: var(--card);
     border: 1px solid var(--card-border);
@@ -213,23 +236,29 @@
 <main>
   <header>
     <h1>Workout Tracker</h1>
-    <p>How long can you hold a plank today?</p>
+    <p>Track your daily workouts</p>
   </header>
 
-  <section class="card" id="today-card">
-    <div class="today-date" id="today-date-label">Loading...</div>
-    <div id="today-content">Connecting...</div>
-    <div class="status" id="today-status"></div>
-  </section>
+  <nav class="toolbar" id="toolbar">
+    <button class="active" data-section="plank">Plank</button>
+  </nav>
 
-  <section class="card">
-    <div class="calendar-header">
-      <button class="secondary" id="prev-month">&larr;</button>
-      <h2 id="month-label"></h2>
-      <button class="secondary" id="next-month">&rarr;</button>
-    </div>
-    <div class="grid" id="calendar-grid"></div>
-  </section>
+  <div class="section-panel" data-section-panel="plank">
+    <section class="card" id="today-card">
+      <div class="today-date" id="today-date-label">Loading...</div>
+      <div id="today-content">Connecting...</div>
+      <div class="status" id="today-status"></div>
+    </section>
+
+    <section class="card">
+      <div class="calendar-header">
+        <button class="secondary" id="prev-month">&larr;</button>
+        <h2 id="month-label"></h2>
+        <button class="secondary" id="next-month">&rarr;</button>
+      </div>
+      <div class="grid" id="calendar-grid"></div>
+    </section>
+  </div>
 </main>
 
 <div class="modal-backdrop hidden" id="modal-backdrop">
@@ -493,6 +522,17 @@ nextMonthBtn.addEventListener("click", () => {
   viewMonth++;
   if (viewMonth > 11) { viewMonth = 0; viewYear++; }
   renderCalendar();
+});
+
+// --- Toolbar ---
+document.getElementById("toolbar").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-section]");
+  if (!btn) return;
+  document.querySelectorAll("#toolbar button").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  document.querySelectorAll("[data-section-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.sectionPanel !== btn.dataset.section);
+  });
 });
 
 // --- Boot ---
