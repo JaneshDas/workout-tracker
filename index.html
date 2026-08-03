@@ -86,7 +86,7 @@
     flex-wrap: wrap;
     align-items: flex-start;
   }
-  .row > #today-card {
+  .row > .main-card {
     flex: 1.6;
     min-width: 240px;
   }
@@ -356,11 +356,12 @@
 
   <nav class="toolbar" id="toolbar">
     <button class="active" data-section="plank">Plank</button>
+    <button data-section="pushups">Pushups</button>
   </nav>
 
   <div class="section-panel" data-section-panel="plank">
     <div class="row">
-      <section class="card" id="today-card">
+      <section class="card main-card" id="today-card">
         <div class="today-date" id="today-date-label">Loading...</div>
         <div id="today-content">Connecting...</div>
       </section>
@@ -391,6 +392,31 @@
         <button class="secondary" id="next-month">&rarr;</button>
       </div>
       <div class="grid" id="calendar-grid"></div>
+    </section>
+  </div>
+
+  <div class="section-panel hidden" data-section-panel="pushups">
+    <div class="row">
+      <section class="card main-card" id="pushup-today-card">
+        <div class="today-date" id="pushup-today-date-label">Loading...</div>
+        <div id="pushup-today-content">Connecting...</div>
+      </section>
+
+      <div class="side-column">
+        <section class="card leaderboard-card">
+          <div class="card-title">Leaderboard</div>
+          <ol class="leaderboard-list" id="pushup-leaderboard-list"></ol>
+        </section>
+      </div>
+    </div>
+
+    <section class="card">
+      <div class="calendar-header">
+        <button class="secondary" id="pushup-prev-month">&larr;</button>
+        <h2 id="pushup-month-label"></h2>
+        <button class="secondary" id="pushup-next-month">&rarr;</button>
+      </div>
+      <div class="grid" id="pushup-calendar-grid"></div>
     </section>
   </div>
 </main>
@@ -426,6 +452,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const ENTRIES_COLLECTION = "plankEntries";
+const PUSHUP_COLLECTION = "pushupEntries";
 
 function dateId(date) {
   const y = date.getFullYear();
@@ -491,6 +518,38 @@ function removeAttempt(id, index) {
 
 function markSkipped(id) {
   return saveDay(id, { attempts: [], skipped: true });
+}
+
+let pushupCache = {}; // dateId -> { total, attempts: [{count, loggedAt}] }
+
+async function fetchAllPushups() {
+  const snap = await getDocs(collection(db, PUSHUP_COLLECTION));
+  snap.forEach((d) => {
+    const data = d.data();
+    const attempts = Array.isArray(data.attempts) ? data.attempts : [];
+    const total = attempts.reduce((sum, a) => sum + (a.count || 0), 0);
+    pushupCache[d.id] = { total, attempts };
+  });
+}
+
+async function savePushupDay(id, attempts) {
+  const total = attempts.reduce((sum, a) => sum + (a.count || 0), 0);
+  await setDoc(doc(db, PUSHUP_COLLECTION, id), {
+    date: id,
+    attempts,
+    updatedAt: new Date().toISOString()
+  });
+  pushupCache[id] = { total, attempts };
+}
+
+function addPushupAttempt(id, count) {
+  const attempts = [...(pushupCache[id]?.attempts || []), { count, loggedAt: new Date().toISOString() }];
+  return savePushupDay(id, attempts);
+}
+
+function removePushupAttempt(id, index) {
+  const attempts = (pushupCache[id]?.attempts || []).filter((_, i) => i !== index);
+  return savePushupDay(id, attempts);
 }
 
 function isHit(entry) {
@@ -571,6 +630,120 @@ function renderLeaderboard() {
       <span class="lb-time">${formatSeconds(entry.seconds)}</span>
     </li>
   `).join("");
+}
+
+const pushupLeaderboardListEl = document.getElementById("pushup-leaderboard-list");
+
+function renderPushupLeaderboard() {
+  const top = Object.entries(pushupCache)
+    .filter(([, entry]) => entry.total > 0)
+    .map(([id, entry]) => ({ id, total: entry.total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+
+  if (top.length === 0) {
+    pushupLeaderboardListEl.innerHTML = `<li class="empty">No entries yet</li>`;
+    return;
+  }
+
+  pushupLeaderboardListEl.innerHTML = top.map((entry, i) => `
+    <li>
+      <span class="rank">${i + 1}</span>
+      <span class="lb-date">${formatShortDate(entry.id)}</span>
+      <span class="lb-time">${entry.total} reps</span>
+    </li>
+  `).join("");
+}
+
+function pushupAttemptsListHtml(attempts) {
+  if (!attempts.length) return "";
+  return `
+    <ul class="attempts-list">
+      ${attempts.map((a, i) => `
+        <li>
+          <span>${a.count} reps</span>
+          <button type="button" class="remove-pushup" data-index="${i}" aria-label="Remove set">&times;</button>
+        </li>
+      `).join("")}
+    </ul>
+  `;
+}
+
+function pushupDayEditorHtml(entry) {
+  const hasAttempts = entry.attempts.length > 0;
+  return `
+    ${hasAttempts ? `
+      <div class="today-result">
+        <div class="time">${entry.total}</div>
+        <div class="label">reps today</div>
+      </div>
+    ` : ""}
+    ${pushupAttemptsListHtml(entry.attempts)}
+    <form class="entry-form pushup-form">
+      <div class="field">
+        <label>Reps</label>
+        <input type="number" class="reps-input" min="0" value="0" inputmode="numeric">
+      </div>
+      <button type="submit">${hasAttempts ? "Add another set" : "Save"}</button>
+    </form>
+    <div class="status" data-role="form-status"></div>
+  `;
+}
+
+function wirePushupDayEditor(container, id, onChange) {
+  const statusEl = container.querySelector('[data-role="form-status"]');
+
+  const form = container.querySelector(".pushup-form");
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const reps = parseInt(container.querySelector(".reps-input").value, 10) || 0;
+
+      if (reps <= 0) {
+        statusEl.textContent = "Enter a rep count greater than 0.";
+        statusEl.classList.add("error");
+        return;
+      }
+
+      statusEl.textContent = "Saving...";
+      statusEl.classList.remove("error");
+      try {
+        await addPushupAttempt(id, reps);
+        onChange();
+      } catch (err) {
+        statusEl.textContent = "Failed to save: " + err.message;
+        statusEl.classList.add("error");
+      }
+    });
+  }
+
+  container.querySelectorAll(".remove-pushup").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await removePushupAttempt(id, parseInt(btn.dataset.index, 10));
+        onChange();
+      } catch (err) {
+        statusEl.textContent = "Failed to remove: " + err.message;
+        statusEl.classList.add("error");
+      }
+    });
+  });
+}
+
+const pushupTodayDateLabel = document.getElementById("pushup-today-date-label");
+const pushupTodayContent = document.getElementById("pushup-today-content");
+pushupTodayDateLabel.textContent = formatLongDate(today);
+
+function renderPushupToday() {
+  const entry = pushupCache[todayId] || { total: 0, attempts: [] };
+  pushupTodayContent.innerHTML = pushupDayEditorHtml(entry);
+  wirePushupDayEditor(pushupTodayContent, todayId, refreshPushups);
+}
+
+function refreshPushups() {
+  renderPushupToday();
+  renderPushupCalendar();
+  renderPushupLeaderboard();
 }
 
 function attemptsListHtml(attempts) {
@@ -729,26 +902,35 @@ function renderCalendar() {
     const entry = entriesCache[id];
     if (entry) el.classList.add(entry.skipped ? "skipped" : "has-entry");
     el.textContent = day;
-    el.addEventListener("click", () => openDayModal(date, id));
+    el.addEventListener("click", () => openDayModal("plank", date, id));
     calendarGrid.appendChild(el);
   }
 }
 
-function openDayModal(date, id) {
+function openDayModal(kind, date, id) {
   modalDate.textContent = formatLongDate(date);
 
   if (id > todayId) {
-    modalBody.innerHTML = `<div class="status">Can't log a plank for a future date.</div>`;
+    modalBody.innerHTML = `<div class="status">Can't log entries for a future date.</div>`;
     modalBackdrop.classList.remove("hidden");
     return;
   }
 
-  const entry = entriesCache[id] || { seconds: 0, skipped: false, attempts: [] };
-  modalBody.innerHTML = dayEditorHtml(entry, { skipLabel: "No plank this day" });
-  wireDayEditor(modalBody, id, () => {
-    refreshAll();
-    openDayModal(date, id);
-  });
+  if (kind === "plank") {
+    const entry = entriesCache[id] || { seconds: 0, skipped: false, attempts: [] };
+    modalBody.innerHTML = dayEditorHtml(entry, { skipLabel: "No plank this day" });
+    wireDayEditor(modalBody, id, () => {
+      refreshAll();
+      openDayModal("plank", date, id);
+    });
+  } else {
+    const entry = pushupCache[id] || { total: 0, attempts: [] };
+    modalBody.innerHTML = pushupDayEditorHtml(entry);
+    wirePushupDayEditor(modalBody, id, () => {
+      refreshPushups();
+      openDayModal("pushup", date, id);
+    });
+  }
 
   modalBackdrop.classList.remove("hidden");
 }
@@ -762,6 +944,60 @@ nextMonthBtn.addEventListener("click", () => {
   viewMonth++;
   if (viewMonth > 11) { viewMonth = 0; viewYear++; }
   renderCalendar();
+});
+
+// --- Pushup calendar ---
+const pushupMonthLabel = document.getElementById("pushup-month-label");
+const pushupCalendarGrid = document.getElementById("pushup-calendar-grid");
+const pushupPrevMonthBtn = document.getElementById("pushup-prev-month");
+const pushupNextMonthBtn = document.getElementById("pushup-next-month");
+
+let pushupViewYear = today.getFullYear();
+let pushupViewMonth = today.getMonth();
+
+function renderPushupCalendar() {
+  pushupMonthLabel.textContent = new Date(pushupViewYear, pushupViewMonth, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  pushupCalendarGrid.innerHTML = "";
+  DOW.forEach((d) => {
+    const el = document.createElement("div");
+    el.className = "dow";
+    el.textContent = d;
+    pushupCalendarGrid.appendChild(el);
+  });
+
+  const firstDay = new Date(pushupViewYear, pushupViewMonth, 1).getDay();
+  const daysInMonth = new Date(pushupViewYear, pushupViewMonth + 1, 0).getDate();
+
+  for (let i = 0; i < firstDay; i++) {
+    const el = document.createElement("div");
+    el.className = "day empty";
+    pushupCalendarGrid.appendChild(el);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(pushupViewYear, pushupViewMonth, day);
+    const id = dateId(date);
+    const el = document.createElement("div");
+    el.className = "day";
+    if (id === todayId) el.classList.add("is-today");
+    const entry = pushupCache[id];
+    if (entry && entry.total > 0) el.classList.add("has-entry");
+    el.textContent = day;
+    el.addEventListener("click", () => openDayModal("pushup", date, id));
+    pushupCalendarGrid.appendChild(el);
+  }
+}
+
+pushupPrevMonthBtn.addEventListener("click", () => {
+  pushupViewMonth--;
+  if (pushupViewMonth < 0) { pushupViewMonth = 11; pushupViewYear--; }
+  renderPushupCalendar();
+});
+pushupNextMonthBtn.addEventListener("click", () => {
+  pushupViewMonth++;
+  if (pushupViewMonth > 11) { pushupViewMonth = 0; pushupViewYear++; }
+  renderPushupCalendar();
 });
 
 // --- Toolbar ---
@@ -779,8 +1015,9 @@ document.getElementById("toolbar").addEventListener("click", (e) => {
 onAuthStateChanged(auth, async (user) => {
   if (!user) return;
   try {
-    await fetchAllEntries();
+    await Promise.all([fetchAllEntries(), fetchAllPushups()]);
     refreshAll();
+    refreshPushups();
   } catch (err) {
     todayContent.innerHTML = `<div class="status error">Could not load entries: ${err.message}</div>`;
   }
