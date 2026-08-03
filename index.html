@@ -79,6 +79,13 @@
     color: var(--accent);
     border-bottom-color: var(--accent);
   }
+  nav.toolbar button.add-section-btn {
+    color: var(--accent);
+    font-size: 1.1rem;
+    font-weight: 700;
+    padding: 10px 12px;
+    margin-left: auto;
+  }
   .section-panel.hidden { display: none; }
   .row {
     display: flex;
@@ -345,6 +352,34 @@
   .modal .time { font-size: 2rem; font-weight: 700; color: var(--accent); margin-bottom: 16px; }
   .modal .entry-form { justify-content: center; margin-bottom: 14px; }
   .modal-actions { display: flex; gap: 8px; justify-content: center; }
+  #new-section-backdrop .modal { max-width: 360px; text-align: left; }
+  #new-section-backdrop .date { text-align: center; }
+  #new-section-title {
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    background: transparent;
+    color: var(--text);
+    font-size: 1rem;
+  }
+  .type-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .type-choice label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .type-choice .hint {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
 </style>
 </head>
 <body>
@@ -354,71 +389,9 @@
     <p>Track your daily workouts</p>
   </header>
 
-  <nav class="toolbar" id="toolbar">
-    <button class="active" data-section="plank">Plank</button>
-    <button data-section="pushups">Pushups</button>
-  </nav>
+  <nav class="toolbar" id="toolbar"></nav>
 
-  <div class="section-panel" data-section-panel="plank">
-    <div class="row">
-      <section class="card main-card" id="today-card">
-        <div class="today-date" id="today-date-label">Loading...</div>
-        <div id="today-content">Connecting...</div>
-      </section>
-
-      <div class="side-column">
-        <section class="card streak-card">
-          <div class="streak-item">
-            <div class="streak-label">Current streak</div>
-            <div class="streak-value" id="current-streak">-</div>
-          </div>
-          <div class="streak-item">
-            <div class="streak-label">Best streak</div>
-            <div class="streak-value" id="best-streak">-</div>
-          </div>
-        </section>
-
-        <section class="card leaderboard-card">
-          <div class="card-title">Leaderboard</div>
-          <ol class="leaderboard-list" id="leaderboard-list"></ol>
-        </section>
-      </div>
-    </div>
-
-    <section class="card">
-      <div class="calendar-header">
-        <button class="secondary" id="prev-month">&larr;</button>
-        <h2 id="month-label"></h2>
-        <button class="secondary" id="next-month">&rarr;</button>
-      </div>
-      <div class="grid" id="calendar-grid"></div>
-    </section>
-  </div>
-
-  <div class="section-panel hidden" data-section-panel="pushups">
-    <div class="row">
-      <section class="card main-card" id="pushup-today-card">
-        <div class="today-date" id="pushup-today-date-label">Loading...</div>
-        <div id="pushup-today-content">Connecting...</div>
-      </section>
-
-      <div class="side-column">
-        <section class="card leaderboard-card">
-          <div class="card-title">Leaderboard</div>
-          <ol class="leaderboard-list" id="pushup-leaderboard-list"></ol>
-        </section>
-      </div>
-    </div>
-
-    <section class="card">
-      <div class="calendar-header">
-        <button class="secondary" id="pushup-prev-month">&larr;</button>
-        <h2 id="pushup-month-label"></h2>
-        <button class="secondary" id="pushup-next-month">&rarr;</button>
-      </div>
-      <div class="grid" id="pushup-calendar-grid"></div>
-    </section>
-  </div>
+  <div id="sections-container"></div>
 </main>
 
 <div class="modal-backdrop hidden" id="modal-backdrop">
@@ -431,11 +404,41 @@
   </div>
 </div>
 
+<div class="modal-backdrop hidden" id="new-section-backdrop">
+  <div class="modal">
+    <div class="date">New section</div>
+    <form id="new-section-form">
+      <div class="field" style="width:100%;">
+        <label for="new-section-title">Title</label>
+        <input type="text" id="new-section-title" placeholder="e.g. Squats" style="width:100%;" autocomplete="off">
+      </div>
+      <div class="field" style="width:100%; margin-top:14px; align-items:flex-start;">
+        <label>Type</label>
+        <div class="type-choice">
+          <label>
+            <input type="radio" name="new-section-type" value="time" checked>
+            Time-based <span class="hint">(like Plank)</span>
+          </label>
+          <label>
+            <input type="radio" name="new-section-type" value="reps">
+            Rep-based <span class="hint">(like Pushups)</span>
+          </label>
+        </div>
+      </div>
+      <div class="status" id="new-section-status"></div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button type="button" class="secondary" id="new-section-cancel">Cancel</button>
+        <button type="submit">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, collection, getDocs
+  getFirestore, doc, setDoc, getDoc, collection, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -451,8 +454,10 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const ENTRIES_COLLECTION = "plankEntries";
-const PUSHUP_COLLECTION = "pushupEntries";
+const BUILTIN_SECTIONS = [
+  { id: "plank", title: "Plank", type: "time" },
+  { id: "pushups", title: "Pushups", type: "reps" }
+];
 
 function dateId(date) {
   const y = date.getFullYear();
@@ -472,109 +477,118 @@ function formatLongDate(date) {
   return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 }
 
-const todayDateLabel = document.getElementById("today-date-label");
-const todayContent = document.getElementById("today-content");
-
-const today = new Date();
-const todayId = dateId(today);
-todayDateLabel.textContent = formatLongDate(today);
-
-let entriesCache = {}; // dateId -> { seconds: bestAttemptSeconds, skipped, attempts: [{seconds, loggedAt}] }
-
-async function fetchAllEntries() {
-  const snap = await getDocs(collection(db, ENTRIES_COLLECTION));
-  snap.forEach((d) => {
-    const data = d.data();
-    // Back-compat: older docs stored a single top-level `seconds` field instead of `attempts`.
-    const attempts = Array.isArray(data.attempts)
-      ? data.attempts
-      : data.seconds ? [{ seconds: data.seconds, loggedAt: data.updatedAt || null }] : [];
-    const seconds = attempts.length ? Math.max(...attempts.map((a) => a.seconds)) : 0;
-    entriesCache[d.id] = { seconds, skipped: !!data.skipped, attempts };
-  });
-}
-
-async function saveDay(id, { attempts, skipped }) {
-  const seconds = attempts.length ? Math.max(...attempts.map((a) => a.seconds)) : 0;
-  await setDoc(doc(db, ENTRIES_COLLECTION, id), {
-    date: id,
-    attempts,
-    skipped: !!skipped,
-    updatedAt: new Date().toISOString()
-  });
-  entriesCache[id] = { seconds, skipped: !!skipped, attempts };
-}
-
-function addAttempt(id, seconds) {
-  const existing = entriesCache[id];
-  const attempts = [...(existing?.attempts || []), { seconds, loggedAt: new Date().toISOString() }];
-  return saveDay(id, { attempts, skipped: false });
-}
-
-function removeAttempt(id, index) {
-  const attempts = (entriesCache[id]?.attempts || []).filter((_, i) => i !== index);
-  return saveDay(id, { attempts, skipped: false });
-}
-
-function markSkipped(id) {
-  return saveDay(id, { attempts: [], skipped: true });
-}
-
-let pushupCache = {}; // dateId -> { total, attempts: [{count, loggedAt}] }
-
-async function fetchAllPushups() {
-  const snap = await getDocs(collection(db, PUSHUP_COLLECTION));
-  snap.forEach((d) => {
-    const data = d.data();
-    const attempts = Array.isArray(data.attempts) ? data.attempts : [];
-    const total = attempts.reduce((sum, a) => sum + (a.count || 0), 0);
-    pushupCache[d.id] = { total, attempts };
-  });
-}
-
-async function savePushupDay(id, attempts) {
-  const total = attempts.reduce((sum, a) => sum + (a.count || 0), 0);
-  await setDoc(doc(db, PUSHUP_COLLECTION, id), {
-    date: id,
-    attempts,
-    updatedAt: new Date().toISOString()
-  });
-  pushupCache[id] = { total, attempts };
-}
-
-function addPushupAttempt(id, count) {
-  const attempts = [...(pushupCache[id]?.attempts || []), { count, loggedAt: new Date().toISOString() }];
-  return savePushupDay(id, attempts);
-}
-
-function removePushupAttempt(id, index) {
-  const attempts = (pushupCache[id]?.attempts || []).filter((_, i) => i !== index);
-  return savePushupDay(id, attempts);
-}
-
-function isHit(entry) {
-  return !!entry && !entry.skipped && entry.seconds > 0;
+function formatShortDate(id) {
+  return new Date(id + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function formatDays(n) {
   return `${n} day${n === 1 ? "" : "s"}`;
 }
 
-function computeCurrentStreak() {
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+const today = new Date();
+const todayId = dateId(today);
+const DOW = ["S", "M", "T", "W", "T", "F", "S"];
+
+let sections = [];
+const caches = {}; // section.id -> { dateId -> entry }
+const viewState = {}; // section.id -> { year, month }
+let activeSectionId = null;
+
+function collectionNameFor(section) {
+  return `${section.id}Entries`;
+}
+
+// --- Data access ---
+async function fetchAllEntriesFor(section) {
+  const snap = await getDocs(collection(db, collectionNameFor(section)));
+  const cache = {};
+  snap.forEach((d) => {
+    const data = d.data();
+    if (section.type === "time") {
+      // Back-compat: older docs stored a single top-level `seconds` field instead of `attempts`.
+      const attempts = Array.isArray(data.attempts)
+        ? data.attempts
+        : data.seconds ? [{ seconds: data.seconds, loggedAt: data.updatedAt || null }] : [];
+      const seconds = attempts.length ? Math.max(...attempts.map((a) => a.seconds)) : 0;
+      cache[d.id] = { seconds, skipped: !!data.skipped, attempts };
+    } else {
+      const attempts = Array.isArray(data.attempts) ? data.attempts : [];
+      const total = attempts.reduce((sum, a) => sum + (a.count || 0), 0);
+      cache[d.id] = { total, attempts };
+    }
+  });
+  caches[section.id] = cache;
+}
+
+async function saveDayFor(section, id, payload) {
+  if (section.type === "time") {
+    const { attempts, skipped } = payload;
+    const seconds = attempts.length ? Math.max(...attempts.map((a) => a.seconds)) : 0;
+    await setDoc(doc(db, collectionNameFor(section), id), {
+      date: id,
+      attempts,
+      skipped: !!skipped,
+      updatedAt: new Date().toISOString()
+    });
+    caches[section.id][id] = { seconds, skipped: !!skipped, attempts };
+  } else {
+    const { attempts } = payload;
+    const total = attempts.reduce((sum, a) => sum + (a.count || 0), 0);
+    await setDoc(doc(db, collectionNameFor(section), id), {
+      date: id,
+      attempts,
+      updatedAt: new Date().toISOString()
+    });
+    caches[section.id][id] = { total, attempts };
+  }
+}
+
+function addAttemptFor(section, id, value) {
+  const existing = caches[section.id][id];
+  if (section.type === "time") {
+    const attempts = [...(existing?.attempts || []), { seconds: value, loggedAt: new Date().toISOString() }];
+    return saveDayFor(section, id, { attempts, skipped: false });
+  }
+  const attempts = [...(existing?.attempts || []), { count: value, loggedAt: new Date().toISOString() }];
+  return saveDayFor(section, id, { attempts });
+}
+
+function removeAttemptFor(section, id, index) {
+  const attempts = (caches[section.id][id]?.attempts || []).filter((_, i) => i !== index);
+  if (section.type === "time") return saveDayFor(section, id, { attempts, skipped: false });
+  return saveDayFor(section, id, { attempts });
+}
+
+function markSkippedFor(section, id) {
+  return saveDayFor(section, id, { attempts: [], skipped: true });
+}
+
+// --- Streaks (time sections only) ---
+function isHit(entry) {
+  return !!entry && !entry.skipped && entry.seconds > 0;
+}
+
+function computeCurrentStreak(section) {
+  const cache = caches[section.id];
   const cursor = new Date(today);
-  if (!entriesCache[todayId]) {
+  if (!cache[todayId]) {
     cursor.setDate(cursor.getDate() - 1);
   }
   let streak = 0;
-  while (isHit(entriesCache[dateId(cursor)])) {
+  while (isHit(cache[dateId(cursor)])) {
     streak++;
     cursor.setDate(cursor.getDate() - 1);
   }
   return streak;
 }
 
-function computeBestStreak() {
-  const hitDates = Object.keys(entriesCache).filter((id) => isHit(entriesCache[id])).sort();
+function computeBestStreak(section) {
+  const cache = caches[section.id];
+  const hitDates = Object.keys(cache).filter((id) => isHit(cache[id])).sort();
   let best = 0;
   let run = 0;
   let prevId = null;
@@ -593,84 +607,90 @@ function computeBestStreak() {
   return best;
 }
 
-const currentStreakEl = document.getElementById("current-streak");
-const bestStreakEl = document.getElementById("best-streak");
-
-function renderStreaks() {
-  const current = computeCurrentStreak();
-  const best = Math.max(computeBestStreak(), current);
-  currentStreakEl.textContent = formatDays(current);
-  currentStreakEl.classList.toggle("zero", current === 0);
-  bestStreakEl.textContent = formatDays(best);
-  bestStreakEl.classList.toggle("zero", best === 0);
+function renderStreaksFor(section, panel) {
+  const current = computeCurrentStreak(section);
+  const best = Math.max(computeBestStreak(section), current);
+  const currentEl = panel.querySelector('[data-role="current-streak"]');
+  const bestEl = panel.querySelector('[data-role="best-streak"]');
+  currentEl.textContent = formatDays(current);
+  currentEl.classList.toggle("zero", current === 0);
+  bestEl.textContent = formatDays(best);
+  bestEl.classList.toggle("zero", best === 0);
 }
 
-function formatShortDate(id) {
-  return new Date(id + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-const leaderboardListEl = document.getElementById("leaderboard-list");
-
-function renderLeaderboard() {
-  const top = Object.entries(entriesCache)
-    .filter(([, entry]) => isHit(entry))
-    .map(([id, entry]) => ({ id, seconds: entry.seconds }))
-    .sort((a, b) => b.seconds - a.seconds)
-    .slice(0, 5);
+// --- Leaderboard ---
+function renderLeaderboardFor(section, panel) {
+  const cache = caches[section.id];
+  const listEl = panel.querySelector('[data-role="leaderboard-list"]');
+  const top = section.type === "time"
+    ? Object.entries(cache)
+        .filter(([, entry]) => isHit(entry))
+        .map(([id, entry]) => ({ id, label: formatSeconds(entry.seconds), value: entry.seconds }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5)
+    : Object.entries(cache)
+        .filter(([, entry]) => entry.total > 0)
+        .map(([id, entry]) => ({ id, label: `${entry.total} reps`, value: entry.total }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5);
 
   if (top.length === 0) {
-    leaderboardListEl.innerHTML = `<li class="empty">No entries yet</li>`;
+    listEl.innerHTML = `<li class="empty">No entries yet</li>`;
     return;
   }
 
-  leaderboardListEl.innerHTML = top.map((entry, i) => `
+  listEl.innerHTML = top.map((entry, i) => `
     <li>
       <span class="rank">${i + 1}</span>
       <span class="lb-date">${formatShortDate(entry.id)}</span>
-      <span class="lb-time">${formatSeconds(entry.seconds)}</span>
+      <span class="lb-time">${entry.label}</span>
     </li>
   `).join("");
 }
 
-const pushupLeaderboardListEl = document.getElementById("pushup-leaderboard-list");
-
-function renderPushupLeaderboard() {
-  const top = Object.entries(pushupCache)
-    .filter(([, entry]) => entry.total > 0)
-    .map(([id, entry]) => ({ id, total: entry.total }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 5);
-
-  if (top.length === 0) {
-    pushupLeaderboardListEl.innerHTML = `<li class="empty">No entries yet</li>`;
-    return;
-  }
-
-  pushupLeaderboardListEl.innerHTML = top.map((entry, i) => `
-    <li>
-      <span class="rank">${i + 1}</span>
-      <span class="lb-date">${formatShortDate(entry.id)}</span>
-      <span class="lb-time">${entry.total} reps</span>
-    </li>
-  `).join("");
-}
-
-function pushupAttemptsListHtml(attempts) {
+// --- Day editor (today card + modal) ---
+function attemptsListHtml(section, attempts) {
   if (!attempts.length) return "";
   return `
     <ul class="attempts-list">
       ${attempts.map((a, i) => `
         <li>
-          <span>${a.count} reps</span>
-          <button type="button" class="remove-pushup" data-index="${i}" aria-label="Remove set">&times;</button>
+          <span>${section.type === "time" ? formatSeconds(a.seconds) : `${a.count} reps`}</span>
+          <button type="button" class="remove-attempt" data-index="${i}" aria-label="Remove entry">&times;</button>
         </li>
       `).join("")}
     </ul>
   `;
 }
 
-function pushupDayEditorHtml(entry) {
+function dayEditorHtml(section, entry, { skipLabel }) {
   const hasAttempts = entry.attempts.length > 0;
+  if (section.type === "time") {
+    return `
+      ${hasAttempts ? `
+        <div class="today-result">
+          <div class="time">${formatSeconds(entry.seconds)}</div>
+          <div class="label">best today</div>
+        </div>
+      ` : ""}
+      ${entry.skipped ? `<div class="time skip">No ${escapeHtml(section.title.toLowerCase())} logged</div>` : ""}
+      ${attemptsListHtml(section, entry.attempts)}
+      <form class="entry-form day-form">
+        <div class="field">
+          <label>Minutes</label>
+          <input type="number" class="mins-input" min="0" value="0" inputmode="numeric">
+        </div>
+        <div class="field">
+          <label>Seconds</label>
+          <input type="number" class="secs-input" min="0" max="59" value="0" inputmode="numeric">
+        </div>
+        <button type="submit">${hasAttempts ? "Add another" : "Save"}</button>
+      </form>
+      <div class="status" data-role="form-status"></div>
+      ${!hasAttempts ? `<button type="button" class="secondary skip-btn" style="margin-top:10px;">${skipLabel}</button>` : ""}
+    `;
+  }
+
   return `
     ${hasAttempts ? `
       <div class="today-result">
@@ -678,8 +698,8 @@ function pushupDayEditorHtml(entry) {
         <div class="label">reps today</div>
       </div>
     ` : ""}
-    ${pushupAttemptsListHtml(entry.attempts)}
-    <form class="entry-form pushup-form">
+    ${attemptsListHtml(section, entry.attempts)}
+    <form class="entry-form day-form">
       <div class="field">
         <label>Reps</label>
         <input type="number" class="reps-input" min="0" value="0" inputmode="numeric">
@@ -690,124 +710,36 @@ function pushupDayEditorHtml(entry) {
   `;
 }
 
-function wirePushupDayEditor(container, id, onChange) {
-  const statusEl = container.querySelector('[data-role="form-status"]');
-
-  const form = container.querySelector(".pushup-form");
-  if (form) {
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const reps = parseInt(container.querySelector(".reps-input").value, 10) || 0;
-
-      if (reps <= 0) {
-        statusEl.textContent = "Enter a rep count greater than 0.";
-        statusEl.classList.add("error");
-        return;
-      }
-
-      statusEl.textContent = "Saving...";
-      statusEl.classList.remove("error");
-      try {
-        await addPushupAttempt(id, reps);
-        onChange();
-      } catch (err) {
-        statusEl.textContent = "Failed to save: " + err.message;
-        statusEl.classList.add("error");
-      }
-    });
-  }
-
-  container.querySelectorAll(".remove-pushup").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      try {
-        await removePushupAttempt(id, parseInt(btn.dataset.index, 10));
-        onChange();
-      } catch (err) {
-        statusEl.textContent = "Failed to remove: " + err.message;
-        statusEl.classList.add("error");
-      }
-    });
-  });
-}
-
-const pushupTodayDateLabel = document.getElementById("pushup-today-date-label");
-const pushupTodayContent = document.getElementById("pushup-today-content");
-pushupTodayDateLabel.textContent = formatLongDate(today);
-
-function renderPushupToday() {
-  const entry = pushupCache[todayId] || { total: 0, attempts: [] };
-  pushupTodayContent.innerHTML = pushupDayEditorHtml(entry);
-  wirePushupDayEditor(pushupTodayContent, todayId, refreshPushups);
-}
-
-function refreshPushups() {
-  renderPushupToday();
-  renderPushupCalendar();
-  renderPushupLeaderboard();
-}
-
-function attemptsListHtml(attempts) {
-  if (!attempts.length) return "";
-  return `
-    <ul class="attempts-list">
-      ${attempts.map((a, i) => `
-        <li>
-          <span>${formatSeconds(a.seconds)}</span>
-          <button type="button" class="remove-attempt" data-index="${i}" aria-label="Remove attempt">&times;</button>
-        </li>
-      `).join("")}
-    </ul>
-  `;
-}
-
-function dayEditorHtml(entry, { skipLabel }) {
-  const hasAttempts = entry.attempts.length > 0;
-  return `
-    ${hasAttempts ? `
-      <div class="today-result">
-        <div class="time">${formatSeconds(entry.seconds)}</div>
-        <div class="label">best today</div>
-      </div>
-    ` : ""}
-    ${entry.skipped ? `<div class="time skip">No plank logged</div>` : ""}
-    ${attemptsListHtml(entry.attempts)}
-    <form class="entry-form day-form">
-      <div class="field">
-        <label>Minutes</label>
-        <input type="number" class="mins-input" min="0" value="0" inputmode="numeric">
-      </div>
-      <div class="field">
-        <label>Seconds</label>
-        <input type="number" class="secs-input" min="0" max="59" value="0" inputmode="numeric">
-      </div>
-      <button type="submit">${hasAttempts ? "Add another" : "Save"}</button>
-    </form>
-    <div class="status" data-role="form-status"></div>
-    ${!hasAttempts ? `<button type="button" class="secondary skip-btn" style="margin-top:10px;">${skipLabel}</button>` : ""}
-  `;
-}
-
-function wireDayEditor(container, id, onChange) {
+function wireDayEditor(section, container, id, onChange) {
   const statusEl = container.querySelector('[data-role="form-status"]');
 
   const form = container.querySelector(".day-form");
   if (form) {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const mins = parseInt(container.querySelector(".mins-input").value, 10) || 0;
-      const secs = parseInt(container.querySelector(".secs-input").value, 10) || 0;
-      const totalSeconds = mins * 60 + secs;
-
-      if (totalSeconds <= 0) {
-        statusEl.textContent = "Enter a time greater than 0.";
-        statusEl.classList.add("error");
-        return;
+      let value;
+      if (section.type === "time") {
+        const mins = parseInt(container.querySelector(".mins-input").value, 10) || 0;
+        const secs = parseInt(container.querySelector(".secs-input").value, 10) || 0;
+        value = mins * 60 + secs;
+        if (value <= 0) {
+          statusEl.textContent = "Enter a time greater than 0.";
+          statusEl.classList.add("error");
+          return;
+        }
+      } else {
+        value = parseInt(container.querySelector(".reps-input").value, 10) || 0;
+        if (value <= 0) {
+          statusEl.textContent = "Enter a rep count greater than 0.";
+          statusEl.classList.add("error");
+          return;
+        }
       }
 
       statusEl.textContent = "Saving...";
       statusEl.classList.remove("error");
       try {
-        await addAttempt(id, totalSeconds);
+        await addAttemptFor(section, id, value);
         onChange();
       } catch (err) {
         statusEl.textContent = "Failed to save: " + err.message;
@@ -819,7 +751,7 @@ function wireDayEditor(container, id, onChange) {
   container.querySelectorAll(".remove-attempt").forEach((btn) => {
     btn.addEventListener("click", async () => {
       try {
-        await removeAttempt(id, parseInt(btn.dataset.index, 10));
+        await removeAttemptFor(section, id, parseInt(btn.dataset.index, 10));
         onChange();
       } catch (err) {
         statusEl.textContent = "Failed to remove: " + err.message;
@@ -834,7 +766,7 @@ function wireDayEditor(container, id, onChange) {
       statusEl.textContent = "Saving...";
       statusEl.classList.remove("error");
       try {
-        await markSkipped(id);
+        await markSkippedFor(section, id);
         onChange();
       } catch (err) {
         statusEl.textContent = "Failed to save: " + err.message;
@@ -844,70 +776,65 @@ function wireDayEditor(container, id, onChange) {
   }
 }
 
-function refreshAll() {
-  renderTodayCard();
-  renderCalendar();
-  renderStreaks();
-  renderLeaderboard();
-}
-
-function renderTodayCard() {
-  const entry = entriesCache[todayId] || { seconds: 0, skipped: false, attempts: [] };
-  todayContent.innerHTML = dayEditorHtml(entry, { skipLabel: "Didn't do a plank today" });
-  wireDayEditor(todayContent, todayId, refreshAll);
+function renderTodayFor(section, panel) {
+  const entry = caches[section.id][todayId] || (section.type === "time" ? { seconds: 0, skipped: false, attempts: [] } : { total: 0, attempts: [] });
+  const contentEl = panel.querySelector('[data-role="today-content"]');
+  contentEl.innerHTML = dayEditorHtml(section, entry, { skipLabel: `Didn't do ${escapeHtml(section.title.toLowerCase())} today` });
+  wireDayEditor(section, contentEl, todayId, () => refreshSection(section));
 }
 
 // --- Calendar ---
-const monthLabel = document.getElementById("month-label");
-const calendarGrid = document.getElementById("calendar-grid");
-const prevMonthBtn = document.getElementById("prev-month");
-const nextMonthBtn = document.getElementById("next-month");
+function renderCalendarFor(section, panel) {
+  const vs = viewState[section.id];
+  const monthLabel = panel.querySelector('[data-role="month-label"]');
+  const grid = panel.querySelector('[data-role="calendar-grid"]');
+
+  monthLabel.textContent = new Date(vs.year, vs.month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  grid.innerHTML = "";
+  DOW.forEach((d) => {
+    const el = document.createElement("div");
+    el.className = "dow";
+    el.textContent = d;
+    grid.appendChild(el);
+  });
+
+  const firstDay = new Date(vs.year, vs.month, 1).getDay();
+  const daysInMonth = new Date(vs.year, vs.month + 1, 0).getDate();
+  const cache = caches[section.id];
+
+  for (let i = 0; i < firstDay; i++) {
+    const el = document.createElement("div");
+    el.className = "day empty";
+    grid.appendChild(el);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(vs.year, vs.month, day);
+    const id = dateId(date);
+    const el = document.createElement("div");
+    el.className = "day";
+    if (id === todayId) el.classList.add("is-today");
+    const entry = cache[id];
+    if (section.type === "time") {
+      if (entry) el.classList.add(entry.skipped ? "skipped" : "has-entry");
+    } else if (entry && entry.total > 0) {
+      el.classList.add("has-entry");
+    }
+    el.textContent = day;
+    el.addEventListener("click", () => openDayModal(section, date, id));
+    grid.appendChild(el);
+  }
+}
+
+// --- Modal (view/edit any day) ---
 const modalBackdrop = document.getElementById("modal-backdrop");
 const modalDate = document.getElementById("modal-date");
 const modalBody = document.getElementById("modal-body");
 document.getElementById("modal-close").addEventListener("click", () => modalBackdrop.classList.add("hidden"));
 modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) modalBackdrop.classList.add("hidden"); });
 
-let viewYear = today.getFullYear();
-let viewMonth = today.getMonth(); // 0-indexed
-
-const DOW = ["S", "M", "T", "W", "T", "F", "S"];
-
-function renderCalendar() {
-  monthLabel.textContent = new Date(viewYear, viewMonth, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-
-  calendarGrid.innerHTML = "";
-  DOW.forEach((d) => {
-    const el = document.createElement("div");
-    el.className = "dow";
-    el.textContent = d;
-    calendarGrid.appendChild(el);
-  });
-
-  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-
-  for (let i = 0; i < firstDay; i++) {
-    const el = document.createElement("div");
-    el.className = "day empty";
-    calendarGrid.appendChild(el);
-  }
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = new Date(viewYear, viewMonth, day);
-    const id = dateId(date);
-    const el = document.createElement("div");
-    el.className = "day";
-    if (id === todayId) el.classList.add("is-today");
-    const entry = entriesCache[id];
-    if (entry) el.classList.add(entry.skipped ? "skipped" : "has-entry");
-    el.textContent = day;
-    el.addEventListener("click", () => openDayModal("plank", date, id));
-    calendarGrid.appendChild(el);
-  }
-}
-
-function openDayModal(kind, date, id) {
+function openDayModal(section, date, id) {
   modalDate.textContent = formatLongDate(date);
 
   if (id > todayId) {
@@ -916,115 +843,236 @@ function openDayModal(kind, date, id) {
     return;
   }
 
-  if (kind === "plank") {
-    const entry = entriesCache[id] || { seconds: 0, skipped: false, attempts: [] };
-    modalBody.innerHTML = dayEditorHtml(entry, { skipLabel: "No plank this day" });
-    wireDayEditor(modalBody, id, () => {
-      refreshAll();
-      openDayModal("plank", date, id);
-    });
-  } else {
-    const entry = pushupCache[id] || { total: 0, attempts: [] };
-    modalBody.innerHTML = pushupDayEditorHtml(entry);
-    wirePushupDayEditor(modalBody, id, () => {
-      refreshPushups();
-      openDayModal("pushup", date, id);
-    });
-  }
+  const entry = caches[section.id][id] || (section.type === "time" ? { seconds: 0, skipped: false, attempts: [] } : { total: 0, attempts: [] });
+  modalBody.innerHTML = dayEditorHtml(section, entry, { skipLabel: `No ${escapeHtml(section.title.toLowerCase())} this day` });
+  wireDayEditor(section, modalBody, id, () => {
+    refreshSection(section);
+    openDayModal(section, date, id);
+  });
 
   modalBackdrop.classList.remove("hidden");
 }
 
-prevMonthBtn.addEventListener("click", () => {
-  viewMonth--;
-  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
-  renderCalendar();
-});
-nextMonthBtn.addEventListener("click", () => {
-  viewMonth++;
-  if (viewMonth > 11) { viewMonth = 0; viewYear++; }
-  renderCalendar();
-});
+// --- Section panels ---
+function sectionPanelHtml(section, isActive) {
+  return `
+    <div class="section-panel${isActive ? "" : " hidden"}" data-section-panel="${section.id}">
+      <div class="row">
+        <section class="card main-card">
+          <div class="today-date">${formatLongDate(today)}</div>
+          <div data-role="today-content">Connecting...</div>
+        </section>
 
-// --- Pushup calendar ---
-const pushupMonthLabel = document.getElementById("pushup-month-label");
-const pushupCalendarGrid = document.getElementById("pushup-calendar-grid");
-const pushupPrevMonthBtn = document.getElementById("pushup-prev-month");
-const pushupNextMonthBtn = document.getElementById("pushup-next-month");
+        <div class="side-column">
+          ${section.type === "time" ? `
+            <section class="card streak-card">
+              <div class="streak-item">
+                <div class="streak-label">Current streak</div>
+                <div class="streak-value" data-role="current-streak">-</div>
+              </div>
+              <div class="streak-item">
+                <div class="streak-label">Best streak</div>
+                <div class="streak-value" data-role="best-streak">-</div>
+              </div>
+            </section>
+          ` : ""}
 
-let pushupViewYear = today.getFullYear();
-let pushupViewMonth = today.getMonth();
+          <section class="card leaderboard-card">
+            <div class="card-title">Leaderboard</div>
+            <ol class="leaderboard-list" data-role="leaderboard-list"></ol>
+          </section>
+        </div>
+      </div>
 
-function renderPushupCalendar() {
-  pushupMonthLabel.textContent = new Date(pushupViewYear, pushupViewMonth, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-
-  pushupCalendarGrid.innerHTML = "";
-  DOW.forEach((d) => {
-    const el = document.createElement("div");
-    el.className = "dow";
-    el.textContent = d;
-    pushupCalendarGrid.appendChild(el);
-  });
-
-  const firstDay = new Date(pushupViewYear, pushupViewMonth, 1).getDay();
-  const daysInMonth = new Date(pushupViewYear, pushupViewMonth + 1, 0).getDate();
-
-  for (let i = 0; i < firstDay; i++) {
-    const el = document.createElement("div");
-    el.className = "day empty";
-    pushupCalendarGrid.appendChild(el);
-  }
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = new Date(pushupViewYear, pushupViewMonth, day);
-    const id = dateId(date);
-    const el = document.createElement("div");
-    el.className = "day";
-    if (id === todayId) el.classList.add("is-today");
-    const entry = pushupCache[id];
-    if (entry && entry.total > 0) el.classList.add("has-entry");
-    el.textContent = day;
-    el.addEventListener("click", () => openDayModal("pushup", date, id));
-    pushupCalendarGrid.appendChild(el);
-  }
+      <section class="card">
+        <div class="calendar-header">
+          <button class="secondary" data-role="prev-month">&larr;</button>
+          <h2 data-role="month-label"></h2>
+          <button class="secondary" data-role="next-month">&rarr;</button>
+        </div>
+        <div class="grid" data-role="calendar-grid"></div>
+      </section>
+    </div>
+  `;
 }
 
-pushupPrevMonthBtn.addEventListener("click", () => {
-  pushupViewMonth--;
-  if (pushupViewMonth < 0) { pushupViewMonth = 11; pushupViewYear--; }
-  renderPushupCalendar();
-});
-pushupNextMonthBtn.addEventListener("click", () => {
-  pushupViewMonth++;
-  if (pushupViewMonth > 11) { pushupViewMonth = 0; pushupViewYear++; }
-  renderPushupCalendar();
-});
+function panelEl(sectionId) {
+  return document.querySelector(`[data-section-panel="${sectionId}"]`);
+}
+
+function createSectionPanel(section, isActive) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = sectionPanelHtml(section, isActive).trim();
+  const panel = wrapper.firstElementChild;
+  document.getElementById("sections-container").appendChild(panel);
+
+  viewState[section.id] = { year: today.getFullYear(), month: today.getMonth() };
+  panel.querySelector('[data-role="prev-month"]').addEventListener("click", () => {
+    const vs = viewState[section.id];
+    vs.month--;
+    if (vs.month < 0) { vs.month = 11; vs.year--; }
+    renderCalendarFor(section, panel);
+  });
+  panel.querySelector('[data-role="next-month"]').addEventListener("click", () => {
+    const vs = viewState[section.id];
+    vs.month++;
+    if (vs.month > 11) { vs.month = 0; vs.year++; }
+    renderCalendarFor(section, panel);
+  });
+}
+
+function refreshSection(section) {
+  const panel = panelEl(section.id);
+  if (!panel) return;
+  renderTodayFor(section, panel);
+  renderCalendarFor(section, panel);
+  if (section.type === "time") renderStreaksFor(section, panel);
+  renderLeaderboardFor(section, panel);
+}
 
 // --- Toolbar ---
-document.getElementById("toolbar").addEventListener("click", (e) => {
+const toolbarEl = document.getElementById("toolbar");
+
+function renderToolbar() {
+  toolbarEl.innerHTML = sections.map((s) => `
+    <button class="${s.id === activeSectionId ? "active" : ""}" data-section="${s.id}">${escapeHtml(s.title)}</button>
+  `).join("") + `<button type="button" class="add-section-btn" id="add-section-btn" aria-label="Add section">+</button>`;
+}
+
+function setActiveSection(id) {
+  activeSectionId = id;
+  toolbarEl.querySelectorAll("button[data-section]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.section === id);
+  });
+  document.querySelectorAll("[data-section-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.sectionPanel !== id);
+  });
+}
+
+toolbarEl.addEventListener("click", (e) => {
+  if (e.target.closest("#add-section-btn")) {
+    openNewSectionModal();
+    return;
+  }
   const btn = e.target.closest("button[data-section]");
   if (!btn) return;
-  document.querySelectorAll("#toolbar button").forEach((b) => b.classList.remove("active"));
-  btn.classList.add("active");
-  document.querySelectorAll("[data-section-panel]").forEach((panel) => {
-    panel.classList.toggle("hidden", panel.dataset.sectionPanel !== btn.dataset.section);
-  });
+  setActiveSection(btn.dataset.section);
+});
+
+// --- New section creation ---
+function slugify(title) {
+  return title.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+}
+
+function uniqueSectionId(base) {
+  const existing = new Set(sections.map((s) => s.id));
+  if (!existing.has(base)) return base;
+  let n = 2;
+  while (existing.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+async function saveCustomSections() {
+  const builtinIds = new Set(BUILTIN_SECTIONS.map((s) => s.id));
+  const custom = sections.filter((s) => !builtinIds.has(s.id)).map((s) => ({ id: s.id, title: s.title, type: s.type }));
+  await setDoc(doc(db, "meta", "sections"), { list: custom });
+}
+
+const newSectionBackdrop = document.getElementById("new-section-backdrop");
+const newSectionForm = document.getElementById("new-section-form");
+const newSectionTitle = document.getElementById("new-section-title");
+const newSectionStatus = document.getElementById("new-section-status");
+
+function openNewSectionModal() {
+  newSectionForm.reset();
+  newSectionStatus.textContent = "";
+  newSectionStatus.classList.remove("error");
+  newSectionBackdrop.classList.remove("hidden");
+  newSectionTitle.focus();
+}
+
+function closeNewSectionModal() {
+  newSectionBackdrop.classList.add("hidden");
+}
+
+document.getElementById("new-section-cancel").addEventListener("click", closeNewSectionModal);
+newSectionBackdrop.addEventListener("click", (e) => { if (e.target === newSectionBackdrop) closeNewSectionModal(); });
+
+newSectionForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = newSectionTitle.value.trim();
+  const type = newSectionForm.querySelector('input[name="new-section-type"]:checked').value;
+
+  if (!title) {
+    newSectionStatus.textContent = "Give it a title.";
+    newSectionStatus.classList.add("error");
+    return;
+  }
+
+  newSectionStatus.textContent = "Creating...";
+  newSectionStatus.classList.remove("error");
+
+  const id = uniqueSectionId(slugify(title));
+  const section = { id, title, type };
+
+  try {
+    sections.push(section);
+    await saveCustomSections();
+    caches[id] = {};
+    renderToolbar();
+    createSectionPanel(section, false);
+    await fetchAllEntriesFor(section);
+    refreshSection(section);
+    setActiveSection(id);
+    closeNewSectionModal();
+  } catch (err) {
+    sections = sections.filter((s) => s.id !== id);
+    newSectionStatus.textContent = "Failed to create: " + err.message;
+    newSectionStatus.classList.add("error");
+  }
 });
 
 // --- Boot ---
+async function loadSections() {
+  sections = [...BUILTIN_SECTIONS];
+  try {
+    const snap = await getDoc(doc(db, "meta", "sections"));
+    if (snap.exists()) {
+      const list = snap.data().list;
+      if (Array.isArray(list)) {
+        const existingIds = new Set(sections.map((s) => s.id));
+        list.forEach((s) => {
+          if (s && s.id && s.title && (s.type === "time" || s.type === "reps") && !existingIds.has(s.id)) {
+            sections.push({ id: s.id, title: s.title, type: s.type });
+            existingIds.add(s.id);
+          }
+        });
+      }
+    }
+  } catch (err) {
+    // No custom sections yet, or not readable — fall back to built-ins.
+  }
+}
+
 onAuthStateChanged(auth, async (user) => {
   if (!user) return;
   try {
-    await Promise.all([fetchAllEntries(), fetchAllPushups()]);
-    refreshAll();
-    refreshPushups();
+    await loadSections();
+    activeSectionId = sections[0].id;
+    renderToolbar();
+    sections.forEach((section, i) => {
+      caches[section.id] = {};
+      createSectionPanel(section, i === 0);
+    });
+    await Promise.all(sections.map((section) => fetchAllEntriesFor(section)));
+    sections.forEach((section) => refreshSection(section));
   } catch (err) {
-    todayContent.innerHTML = `<div class="status error">Could not load entries: ${err.message}</div>`;
+    document.getElementById("sections-container").innerHTML = `<div class="status error">Could not load entries: ${err.message}</div>`;
   }
 });
 
 signInAnonymously(auth).catch((err) => {
-  todayContent.innerHTML = `<div class="status error">Sign-in failed: ${err.message}</div>`;
+  document.getElementById("sections-container").innerHTML = `<div class="status error">Sign-in failed: ${err.message}</div>`;
 });
 </script>
 </body>
