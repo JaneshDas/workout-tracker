@@ -203,8 +203,10 @@
     max-width: 320px;
     text-align: center;
   }
-  .modal .date { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 8px; }
+  .modal .date { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 12px; }
   .modal .time { font-size: 2rem; font-weight: 700; color: var(--accent); margin-bottom: 16px; }
+  .modal .entry-form { justify-content: center; margin-bottom: 14px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: center; }
 </style>
 </head>
 <body>
@@ -233,8 +235,11 @@
 <div class="modal-backdrop hidden" id="modal-backdrop">
   <div class="modal">
     <div class="date" id="modal-date"></div>
-    <div class="time" id="modal-time"></div>
-    <button class="secondary" id="modal-close">Close</button>
+    <div id="modal-body"></div>
+    <div class="status" id="modal-status"></div>
+    <div class="modal-actions">
+      <button class="secondary" id="modal-close">Close</button>
+    </div>
   </div>
 </div>
 
@@ -288,21 +293,37 @@ todayDateLabel.textContent = formatLongDate(today);
 
 let entriesCache = {}; // dateId -> seconds, populated per visible month
 
-function renderTodayForm() {
-  todayContent.innerHTML = `
-    <form class="entry-form" id="entry-form">
+async function saveEntry(id, seconds) {
+  await setDoc(doc(db, ENTRIES_COLLECTION, id), {
+    date: id,
+    seconds,
+    updatedAt: new Date().toISOString()
+  });
+  entriesCache[id] = seconds;
+}
+
+function entryFormHtml({ idPrefix, existingSeconds, submitLabel }) {
+  const mins = existingSeconds !== undefined ? Math.floor(existingSeconds / 60) : 0;
+  const secs = existingSeconds !== undefined ? existingSeconds % 60 : 0;
+  return `
+    <form class="entry-form" id="${idPrefix}-form">
       <div class="field">
-        <label for="mins">Minutes</label>
-        <input type="number" id="mins" min="0" value="0" inputmode="numeric">
+        <label for="${idPrefix}-mins">Minutes</label>
+        <input type="number" id="${idPrefix}-mins" min="0" value="${mins}" inputmode="numeric">
       </div>
       <div class="field">
-        <label for="secs">Seconds</label>
-        <input type="number" id="secs" min="0" max="59" value="0" inputmode="numeric">
+        <label for="${idPrefix}-secs">Seconds</label>
+        <input type="number" id="${idPrefix}-secs" min="0" max="59" value="${secs}" inputmode="numeric">
       </div>
-      <button type="submit">Save today's plank</button>
+      <button type="submit">${submitLabel}</button>
     </form>
   `;
-  document.getElementById("entry-form").addEventListener("submit", onSubmitEntry);
+}
+
+function renderTodayForm(existingSeconds) {
+  const label = existingSeconds !== undefined ? "Update today's plank" : "Save today's plank";
+  todayContent.innerHTML = entryFormHtml({ idPrefix: "today", existingSeconds, submitLabel: label });
+  document.getElementById("today-form").addEventListener("submit", (e) => onSubmitEntry(e, existingSeconds !== undefined));
 }
 
 function renderTodayResult(seconds) {
@@ -311,13 +332,15 @@ function renderTodayResult(seconds) {
       <div class="time">${formatSeconds(seconds)}</div>
       <div class="label">logged for today</div>
     </div>
+    <button class="secondary" id="edit-today-btn">Edit</button>
   `;
+  document.getElementById("edit-today-btn").addEventListener("click", () => renderTodayForm(seconds));
 }
 
-async function onSubmitEntry(e) {
+async function onSubmitEntry(e, isUpdate) {
   e.preventDefault();
-  const mins = parseInt(document.getElementById("mins").value, 10) || 0;
-  const secs = parseInt(document.getElementById("secs").value, 10) || 0;
+  const mins = parseInt(document.getElementById("today-mins").value, 10) || 0;
+  const secs = parseInt(document.getElementById("today-secs").value, 10) || 0;
   const totalSeconds = mins * 60 + secs;
 
   if (totalSeconds <= 0) {
@@ -330,14 +353,9 @@ async function onSubmitEntry(e) {
   todayStatus.classList.remove("error");
 
   try {
-    await setDoc(doc(db, ENTRIES_COLLECTION, todayId), {
-      date: todayId,
-      seconds: totalSeconds,
-      createdAt: new Date().toISOString()
-    });
-    entriesCache[todayId] = totalSeconds;
+    await saveEntry(todayId, totalSeconds);
     renderTodayResult(totalSeconds);
-    todayStatus.textContent = "Saved!";
+    todayStatus.textContent = isUpdate ? "Updated!" : "Saved!";
     renderCalendar();
   } catch (err) {
     todayStatus.textContent = "Failed to save: " + err.message;
@@ -368,7 +386,8 @@ const prevMonthBtn = document.getElementById("prev-month");
 const nextMonthBtn = document.getElementById("next-month");
 const modalBackdrop = document.getElementById("modal-backdrop");
 const modalDate = document.getElementById("modal-date");
-const modalTime = document.getElementById("modal-time");
+const modalBody = document.getElementById("modal-body");
+const modalStatus = document.getElementById("modal-status");
 document.getElementById("modal-close").addEventListener("click", () => modalBackdrop.classList.add("hidden"));
 modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) modalBackdrop.classList.add("hidden"); });
 
@@ -425,8 +444,43 @@ async function renderCalendar() {
 
 function openDayModal(date, id) {
   modalDate.textContent = formatLongDate(date);
+  modalStatus.textContent = "";
+  modalStatus.classList.remove("error");
+
+  if (id > todayId) {
+    modalBody.innerHTML = `<div class="status">Can't log a plank for a future date.</div>`;
+    modalBackdrop.classList.remove("hidden");
+    return;
+  }
+
   const seconds = entriesCache[id];
-  modalTime.textContent = seconds !== undefined ? formatSeconds(seconds) : "No entry";
+  const label = seconds !== undefined ? "Update" : "Save";
+  modalBody.innerHTML = entryFormHtml({ idPrefix: "modal", existingSeconds: seconds, submitLabel: label });
+  document.getElementById("modal-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const mins = parseInt(document.getElementById("modal-mins").value, 10) || 0;
+    const secs = parseInt(document.getElementById("modal-secs").value, 10) || 0;
+    const totalSeconds = mins * 60 + secs;
+
+    if (totalSeconds <= 0) {
+      modalStatus.textContent = "Enter a time greater than 0.";
+      modalStatus.classList.add("error");
+      return;
+    }
+
+    modalStatus.textContent = "Saving...";
+    modalStatus.classList.remove("error");
+
+    try {
+      await saveEntry(id, totalSeconds);
+      modalStatus.textContent = "Saved!";
+      if (id === todayId) renderTodayResult(totalSeconds);
+      renderCalendar();
+    } catch (err) {
+      modalStatus.textContent = "Failed to save: " + err.message;
+      modalStatus.classList.add("error");
+    }
+  });
   modalBackdrop.classList.remove("hidden");
 }
 
