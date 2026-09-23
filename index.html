@@ -189,6 +189,12 @@
     border-radius: 8px;
     font-size: 0.9rem;
   }
+  .attempts-list .attempt-time {
+    flex: 1;
+    text-align: right;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
   .attempts-list .remove-attempt {
     background: transparent;
     border: none;
@@ -481,6 +487,11 @@ function formatShortDate(id) {
   return new Date(id + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function formatClockTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
 function formatDays(n) {
   return `${n} day${n === 1 ? "" : "s"}`;
 }
@@ -657,6 +668,7 @@ function attemptsListHtml(section, attempts) {
       ${attempts.map((a, i) => `
         <li>
           <span>${section.type === "time" ? formatSeconds(a.seconds) : `${a.count} reps`}</span>
+          <span class="attempt-time">${formatClockTime(a.loggedAt)}</span>
           <button type="button" class="remove-attempt" data-index="${i}" aria-label="Remove entry">&times;</button>
         </li>
       `).join("")}
