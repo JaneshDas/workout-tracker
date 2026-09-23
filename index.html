@@ -161,9 +161,12 @@
     width: 16px;
     font-weight: 600;
   }
-  .leaderboard-list .lb-date {
+  .leaderboard-list .lb-name {
     flex: 1;
-    color: var(--text-dim);
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .leaderboard-list .lb-time {
     font-weight: 700;
@@ -171,6 +174,34 @@
   }
   .leaderboard-list .empty {
     color: var(--text-dim);
+  }
+  .leaderboard-list .lb-row {
+    cursor: pointer;
+    padding: 4px 6px;
+    margin: 0 -6px;
+    border-radius: 8px;
+  }
+  .leaderboard-list .lb-row:hover {
+    background: var(--card-border);
+  }
+  .leaderboard-list .lb-row.me .lb-name {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .lb-join {
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .lb-join.hidden {
+    display: none;
+  }
+  .lb-join .status {
+    margin-top: 0;
+    margin-bottom: 10px;
+  }
+  .lb-join-form button {
+    padding: 10px 16px;
   }
   .attempts-list {
     list-style: none;
@@ -410,6 +441,16 @@
   </div>
 </div>
 
+<div class="modal-backdrop hidden" id="lb-modal-backdrop">
+  <div class="modal">
+    <div class="date" id="lb-modal-name"></div>
+    <div id="lb-modal-body"></div>
+    <div class="modal-actions">
+      <button class="secondary" id="lb-modal-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop hidden" id="new-section-backdrop">
   <div class="modal">
     <div class="date">New section</div>
@@ -444,7 +485,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, getDoc, collection, getDocs
+  getFirestore, doc, setDoc, getDoc, collection, getDocs, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -483,10 +524,6 @@ function formatLongDate(date) {
   return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 }
 
-function formatShortDate(id) {
-  return new Date(id + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 function formatClockTime(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -509,6 +546,8 @@ const caches = {}; // section.id -> { dateId -> entry }
 const viewState = {}; // section.id -> { year, month }
 let activeSectionId = null;
 let uid = null;
+let leaderboardName = null;
+let leaderboardDocs = [];
 
 function collectionNameFor(section) {
   return `${section.id}Entries`;
@@ -556,6 +595,9 @@ async function saveDayFor(section, id, payload) {
       updatedAt: new Date().toISOString()
     });
     caches[section.id][id] = { total, attempts };
+  }
+  if (id === todayId) {
+    await pushLeaderboardEntry(section, caches[section.id][id]);
   }
 }
 
@@ -630,34 +672,75 @@ function renderStreaksFor(section, panel) {
   bestEl.classList.toggle("zero", best === 0);
 }
 
-// --- Leaderboard ---
-function renderLeaderboardFor(section, panel) {
-  const cache = caches[section.id];
-  const listEl = panel.querySelector('[data-role="leaderboard-list"]');
-  const top = section.type === "time"
-    ? Object.entries(cache)
-        .filter(([, entry]) => isHit(entry))
-        .map(([id, entry]) => ({ id, label: formatSeconds(entry.seconds), value: entry.seconds }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 5)
-    : Object.entries(cache)
-        .filter(([, entry]) => entry.total > 0)
-        .map(([id, entry]) => ({ id, label: `${entry.total} reps`, value: entry.total }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 5);
+// --- Leaderboard (cross-user, today only) ---
+function leaderboardRowsFor(section) {
+  return leaderboardDocs
+    .map((d) => {
+      const s = d.sections && d.sections[section.id];
+      if (!s || s.date !== todayId) return null;
+      return { uid: d.id, name: d.name || "Anonymous", value: s.value, attempts: s.attempts || [] };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.value - a.value);
+}
 
-  if (top.length === 0) {
-    listEl.innerHTML = `<li class="empty">No entries yet</li>`;
+function pushLeaderboardEntry(section, entry) {
+  if (!leaderboardName) return Promise.resolve();
+  const value = section.type === "time" ? entry.seconds : entry.total;
+  const attempts = entry.attempts.map((a) => ({
+    value: section.type === "time" ? a.seconds : a.count,
+    loggedAt: a.loggedAt || null
+  }));
+  return setDoc(doc(db, "leaderboard", uid), {
+    name: leaderboardName,
+    sections: { [section.id]: { date: todayId, value, attempts } }
+  }, { merge: true });
+}
+
+async function joinLeaderboard(name) {
+  leaderboardName = name;
+  await setDoc(doc(db, "leaderboard", uid), { name }, { merge: true });
+  await Promise.all(sections.map((section) => {
+    const entry = caches[section.id][todayId];
+    if (entry && entry.attempts.length) return pushLeaderboardEntry(section, entry);
+    return null;
+  }));
+  renderAllLeaderboards();
+}
+
+function renderAllLeaderboards() {
+  sections.forEach((section) => {
+    const panel = panelEl(section.id);
+    if (panel) renderLeaderboardFor(section, panel);
+  });
+}
+
+function renderLeaderboardFor(section, panel) {
+  const listEl = panel.querySelector('[data-role="leaderboard-list"]');
+  const joinBox = panel.querySelector('[data-role="leaderboard-join"]');
+  if (joinBox) joinBox.classList.toggle("hidden", !!leaderboardName);
+
+  const rows = leaderboardRowsFor(section);
+
+  if (rows.length === 0) {
+    listEl.innerHTML = `<li class="empty">No entries yet today</li>`;
     return;
   }
 
-  listEl.innerHTML = top.map((entry, i) => `
-    <li>
+  listEl.innerHTML = rows.map((row, i) => `
+    <li class="lb-row${row.uid === uid ? " me" : ""}" data-uid="${row.uid}">
       <span class="rank">${i + 1}</span>
-      <span class="lb-date">${formatShortDate(entry.id)}</span>
-      <span class="lb-time">${entry.label}</span>
+      <span class="lb-name">${escapeHtml(row.name)}</span>
+      <span class="lb-time">${section.type === "time" ? formatSeconds(row.value) : `${row.value} reps`}</span>
     </li>
   `).join("");
+
+  listEl.querySelectorAll(".lb-row").forEach((rowEl) => {
+    rowEl.addEventListener("click", () => {
+      const row = rows.find((r) => r.uid === rowEl.dataset.uid);
+      openLeaderboardModal(row, section);
+    });
+  });
 }
 
 // --- Day editor (today card + modal) ---
@@ -866,6 +949,28 @@ function openDayModal(section, date, id) {
   modalBackdrop.classList.remove("hidden");
 }
 
+// --- Modal (view a leaderboard entry's times) ---
+const lbModalBackdrop = document.getElementById("lb-modal-backdrop");
+const lbModalName = document.getElementById("lb-modal-name");
+const lbModalBody = document.getElementById("lb-modal-body");
+document.getElementById("lb-modal-close").addEventListener("click", () => lbModalBackdrop.classList.add("hidden"));
+lbModalBackdrop.addEventListener("click", (e) => { if (e.target === lbModalBackdrop) lbModalBackdrop.classList.add("hidden"); });
+
+function openLeaderboardModal(row, section) {
+  if (!row) return;
+  lbModalName.textContent = row.name;
+  const attempts = [...row.attempts].sort((a, b) => new Date(a.loggedAt) - new Date(b.loggedAt));
+  lbModalBody.innerHTML = attempts.length
+    ? `<ul class="attempts-list">${attempts.map((a) => `
+        <li>
+          <span>${section.type === "time" ? formatSeconds(a.value) : `${a.value} reps`}</span>
+          <span class="attempt-time">${formatClockTime(a.loggedAt)}</span>
+        </li>
+      `).join("")}</ul>`
+    : `<div class="status">No entries yet today.</div>`;
+  lbModalBackdrop.classList.remove("hidden");
+}
+
 // --- Section panels ---
 function sectionPanelHtml(section, isActive) {
   return `
@@ -891,7 +996,17 @@ function sectionPanelHtml(section, isActive) {
           ` : ""}
 
           <section class="card leaderboard-card">
-            <div class="card-title">Leaderboard</div>
+            <div class="card-title">Leaderboard &middot; Today</div>
+            <div class="lb-join hidden" data-role="leaderboard-join">
+              <p class="status">Enter your name to join the leaderboard.</p>
+              <form class="entry-form lb-join-form">
+                <div class="field" style="flex:1; min-width:120px;">
+                  <label>Name</label>
+                  <input type="text" class="lb-name-input" placeholder="Your name" autocomplete="off" maxlength="24" style="width:100%;">
+                </div>
+                <button type="submit">Join</button>
+              </form>
+            </div>
             <ol class="leaderboard-list" data-role="leaderboard-list"></ol>
           </section>
         </div>
@@ -932,6 +1047,17 @@ function createSectionPanel(section, isActive) {
     if (vs.month > 11) { vs.month = 0; vs.year++; }
     renderCalendarFor(section, panel);
   });
+
+  const joinForm = panel.querySelector(".lb-join-form");
+  if (joinForm) {
+    joinForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const nameInput = joinForm.querySelector(".lb-name-input");
+      const name = nameInput.value.trim();
+      if (!name) return;
+      await joinLeaderboard(name);
+    });
+  }
 }
 
 function refreshSection(section) {
@@ -1071,6 +1197,9 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) return;
   uid = user.uid;
   try {
+    const lbSnap = await getDoc(doc(db, "leaderboard", uid));
+    if (lbSnap.exists() && lbSnap.data().name) leaderboardName = lbSnap.data().name;
+
     await loadSections();
     activeSectionId = sections[0].id;
     renderToolbar();
@@ -1080,6 +1209,11 @@ onAuthStateChanged(auth, async (user) => {
     });
     await Promise.all(sections.map((section) => fetchAllEntriesFor(section)));
     sections.forEach((section) => refreshSection(section));
+
+    onSnapshot(collection(db, "leaderboard"), (snap) => {
+      leaderboardDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderAllLeaderboards();
+    });
   } catch (err) {
     document.getElementById("sections-container").innerHTML = `<div class="status error">Could not load entries: ${err.message}</div>`;
   }
