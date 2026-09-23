@@ -497,6 +497,7 @@ let sections = [];
 const caches = {}; // section.id -> { dateId -> entry }
 const viewState = {}; // section.id -> { year, month }
 let activeSectionId = null;
+let uid = null;
 
 function collectionNameFor(section) {
   return `${section.id}Entries`;
@@ -504,7 +505,7 @@ function collectionNameFor(section) {
 
 // --- Data access ---
 async function fetchAllEntriesFor(section) {
-  const snap = await getDocs(collection(db, collectionNameFor(section)));
+  const snap = await getDocs(collection(db, "users", uid, collectionNameFor(section)));
   const cache = {};
   snap.forEach((d) => {
     const data = d.data();
@@ -528,7 +529,7 @@ async function saveDayFor(section, id, payload) {
   if (section.type === "time") {
     const { attempts, skipped } = payload;
     const seconds = attempts.length ? Math.max(...attempts.map((a) => a.seconds)) : 0;
-    await setDoc(doc(db, collectionNameFor(section), id), {
+    await setDoc(doc(db, "users", uid, collectionNameFor(section), id), {
       date: id,
       attempts,
       skipped: !!skipped,
@@ -538,7 +539,7 @@ async function saveDayFor(section, id, payload) {
   } else {
     const { attempts } = payload;
     const total = attempts.reduce((sum, a) => sum + (a.count || 0), 0);
-    await setDoc(doc(db, collectionNameFor(section), id), {
+    await setDoc(doc(db, "users", uid, collectionNameFor(section), id), {
       date: id,
       attempts,
       updatedAt: new Date().toISOString()
@@ -975,7 +976,7 @@ function uniqueSectionId(base) {
 async function saveCustomSections() {
   const builtinIds = new Set(BUILTIN_SECTIONS.map((s) => s.id));
   const custom = sections.filter((s) => !builtinIds.has(s.id)).map((s) => ({ id: s.id, title: s.title, type: s.type }));
-  await setDoc(doc(db, "meta", "sections"), { list: custom });
+  await setDoc(doc(db, "users", uid, "meta", "sections"), { list: custom });
 }
 
 const newSectionBackdrop = document.getElementById("new-section-backdrop");
@@ -1036,7 +1037,7 @@ newSectionForm.addEventListener("submit", async (e) => {
 async function loadSections() {
   sections = [...BUILTIN_SECTIONS];
   try {
-    const snap = await getDoc(doc(db, "meta", "sections"));
+    const snap = await getDoc(doc(db, "users", uid, "meta", "sections"));
     if (snap.exists()) {
       const list = snap.data().list;
       if (Array.isArray(list)) {
@@ -1056,6 +1057,7 @@ async function loadSections() {
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) return;
+  uid = user.uid;
   try {
     await loadSections();
     activeSectionId = sections[0].id;

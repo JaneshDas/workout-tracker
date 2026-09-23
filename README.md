@@ -8,7 +8,7 @@ A single-page site to track daily plank hold times, with a calendar to browse hi
 ## Stack
 
 - Plain HTML/CSS/JS, no build step (`index.html`).
-- Firebase (Firestore) for storage, with anonymous auth so data works across devices without a login screen.
+- Firebase (Firestore) for storage, with anonymous auth so each visitor gets their own private data without a login screen. Data is scoped per anonymous user (tied to the browser) — it doesn't carry over to a different browser or device, and isn't shared with anyone else.
 
 ## Deployment
 
